@@ -1,0 +1,298 @@
+import { SipgateApiError, SipgateClient } from "./sipgate-client.js";
+import type {
+  DeviceType,
+  ForwardingRule,
+  HistoryQuery,
+  JsonObject,
+  JsonValue,
+  MutationResult,
+  PaginationInput,
+  TelephonyBackend,
+} from "./telephony-backend.js";
+
+interface ItemsResponse {
+  items?: JsonObject[];
+  totalCount?: number;
+}
+
+const SENSITIVE_KEY = /authorization|credential|password|secret|token/i;
+
+function sanitize(value: unknown): JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(sanitize);
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, SENSITIVE_KEY.test(key) ? "[REDACTED]" : sanitize(child)]),
+    );
+  }
+  return String(value);
+}
+
+function asItems(value: JsonValue | undefined): JsonObject[] {
+  if (!value || Array.isArray(value) || typeof value !== "object") return [];
+  const items = (value as ItemsResponse).items;
+  return Array.isArray(items) ? items : [];
+}
+
+function stringField(value: JsonObject, key: string): string | undefined {
+  const field = value[key];
+  return typeof field === "string" ? field : undefined;
+}
+
+function encodeId(id: string): string {
+  return encodeURIComponent(id);
+}
+
+export class SipgateBackend implements TelephonyBackend {
+  public constructor(private readonly client: SipgateClient) {}
+
+  public async getAccountInfo(): Promise<JsonValue> {
+    const [account, authenticatedUser] = await Promise.all([
+      this.client.request<JsonValue>("/account"),
+      this.client.request<JsonValue>("/authorization/userinfo"),
+    ]);
+    return sanitize({ account, authenticatedUser });
+  }
+
+  public async listUsers(): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/users");
+    return sanitize(response ?? { items: [] });
+  }
+
+  public async listNumbers({ offset, limit }: PaginationInput): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/numbers", { query: { offset, limit } });
+    const items = asItems(response);
+    return sanitize({ items, pagination: { offset, limit, returned: items.length } });
+  }
+
+  public async listDevices(userId?: string, types?: DeviceType[]): Promise<JsonValue> {
+    const userIds = userId ? [userId] : asItems(await this.client.request<JsonValue>("/users"))
+      .map((user) => stringField(user, "id"))
+      .filter((id): id is string => Boolean(id));
+
+    const type = types && types.length > 0 ? types.join(",") : undefined;
+    const responses = await Promise.all(
+      userIds.map(async (id) => ({
+        userId: id,
+        response: await this.client.request<JsonValue>(`/${encodeId(id)}/devices`, { query: { type } }),
+      })),
+    );
+    const items = responses.flatMap(({ userId: ownerId, response }) =>
+      asItems(response).map((device) => ({ ...device, userId: ownerId })),
+    );
+    return sanitize({ items });
+  }
+
+  public async getRouting(userId?: string): Promise<JsonValue> {
+    const [numbersResponse, usersResponse] = await Promise.all([
+      this.client.request<JsonValue>("/numbers", { query: { offset: 0, limit: 1000 } }),
+      userId ? Promise.resolve(undefined) : this.client.request<JsonValue>("/users"),
+    ]);
+    const userIds = userId ? [userId] : asItems(usersResponse)
+      .map((user) => stringField(user, "id"))
+      .filter((id): id is string => Boolean(id));
+
+    const users = await Promise.all(userIds.map(async (id) => {
+      const phonelinesResponse = await this.client.request<JsonValue>(`/${encodeId(id)}/phonelines`);
+      const phonelines = await Promise.all(asItems(phonelinesResponse).map(async (phoneline) => {
+        const phonelineId = stringField(phoneline, "id");
+        if (!phonelineId) return { ...phoneline, numbers: [], forwardings: [] };
+        const base = `/${encodeId(id)}/phonelines/${encodeId(phonelineId)}`;
+        const [lineNumbers, forwardings] = await Promise.all([
+          this.client.request<JsonValue>(`${base}/numbers`),
+          this.client.request<JsonValue>(`${base}/forwardings`),
+        ]);
+        return {
+          ...phoneline,
+          numbers: asItems(lineNumbers),
+          forwardings: asItems(forwardings),
+        };
+      }));
+      return { userId: id, phonelines };
+    }));
+
+    return sanitize({ numbers: asItems(numbersResponse), users });
+  }
+
+  public async getCallHistory(query: HistoryQuery): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/history", {
+      query: {
+        connectionIds: query.connectionIds,
+        types: query.types ?? ["CALL"],
+        directions: query.directions,
+        offset: query.offset,
+        limit: query.limit,
+        from: query.from,
+        to: query.to,
+        phonenumber: query.phoneNumber,
+      },
+    });
+    const object = response && !Array.isArray(response) && typeof response === "object" ? response : {};
+    const items = asItems(response);
+    const totalCount = typeof object.totalCount === "number" ? object.totalCount : items.length;
+    const nextOffset = query.offset + items.length < totalCount ? query.offset + items.length : null;
+    return sanitize({
+      items,
+      pagination: { offset: query.offset, limit: query.limit, totalCount, nextOffset },
+    });
+  }
+
+  public async getSettings(userId?: string): Promise<JsonValue> {
+    const users = userId
+      ? [await this.client.request<JsonValue>(`/users/${encodeId(userId)}`)]
+      : asItems(await this.client.request<JsonValue>("/users"));
+
+    const settings = await Promise.all(users.map(async (userValue) => {
+      if (!userValue || Array.isArray(userValue) || typeof userValue !== "object") return null;
+      const user = userValue as JsonObject;
+      const id = stringField(user, "id");
+      if (!id) return null;
+      const [devicesResponse, phonelinesResponse] = await Promise.all([
+        this.client.request<JsonValue>(`/${encodeId(id)}/devices`),
+        this.client.request<JsonValue>(`/${encodeId(id)}/phonelines`),
+      ]);
+      const phonelines = await Promise.all(asItems(phonelinesResponse).map(async (line) => {
+        const lineId = stringField(line, "id");
+        if (!lineId) return line;
+        return await this.client.request<JsonValue>(`/${encodeId(id)}/phonelines/${encodeId(lineId)}`) ?? line;
+      }));
+      return {
+        user,
+        reachability: {
+          busyOnBusy: user.busyOnBusy ?? null,
+          defaultDevice: user.defaultDevice ?? null,
+          devices: asItems(devicesResponse),
+        },
+        phonelines,
+      };
+    }));
+    return sanitize({ users: settings.filter((item) => item !== null) });
+  }
+
+  public async setNumberRouting(numberId: string, endpointId: string): Promise<MutationResult> {
+    const before = await this.findNumber(numberId);
+    await this.client.request<JsonValue>(`/numbers/${encodeId(numberId)}`, {
+      method: "PUT",
+      body: { endpointId },
+    });
+    const after = await this.findNumber(numberId);
+    return { before: sanitize(before), after: sanitize(after) };
+  }
+
+  public async setForwarding(
+    userId: string,
+    phonelineId: string,
+    forwardings: ForwardingRule[],
+  ): Promise<MutationResult> {
+    const path = `/${encodeId(userId)}/phonelines/${encodeId(phonelineId)}/forwardings`;
+    const before = await this.client.request<JsonValue>(path);
+    await this.client.request<JsonValue>(path, {
+      method: "PUT",
+      body: { forwardings },
+    });
+    const after = await this.client.request<JsonValue>(path);
+    return { before: sanitize(before ?? { items: [] }), after: sanitize(after ?? { items: [] }) };
+  }
+
+  public async setDnd(deviceId: string, enabled: boolean): Promise<MutationResult> {
+    const path = `/devices/${encodeId(deviceId)}`;
+    const before = await this.client.request<JsonValue>(path);
+    await this.client.request<JsonValue>(path, { method: "PUT", body: { dnd: enabled } });
+    const after = await this.client.request<JsonValue>(path);
+    return { before: sanitize(before ?? {}), after: sanitize(after ?? {}) };
+  }
+
+  public async sendSms(input: {
+    userId: string;
+    smsId?: string;
+    recipient: string;
+    message: string;
+    sendAt?: number;
+  }): Promise<MutationResult> {
+    const extensions = asItems(
+      await this.client.request<JsonValue>(`/${encodeId(input.userId)}/sms`),
+    );
+    const extension = input.smsId
+      ? extensions.find((item) => stringField(item, "id") === input.smsId)
+      : extensions[0];
+    if (!extension) {
+      throw new SipgateApiError(
+        input.smsId
+          ? "The requested SMS extension is not available for this user."
+          : "No SMS-capable extension is available for this user.",
+        404,
+      );
+    }
+    const smsId = stringField(extension, "id");
+    if (!smsId) throw new SipgateApiError("sipgate returned an SMS extension without an ID.");
+
+    const beforeHistory = await this.latestHistory("SMS", input.recipient);
+    await this.client.request<JsonValue>("/sessions/sms", {
+      method: "POST",
+      body: {
+        smsId,
+        recipient: input.recipient,
+        message: input.message,
+        ...(input.sendAt === undefined ? {} : { sendAt: input.sendAt }),
+      },
+    });
+    const afterHistory = await this.latestHistory("SMS", input.recipient);
+    return {
+      before: sanitize({ smsExtension: extension, latestMatchingHistory: beforeHistory }),
+      after: sanitize({
+        smsExtension: extension,
+        latestMatchingHistory: afterHistory,
+        requestAccepted: true,
+      }),
+    };
+  }
+
+  public async initiateCall(input: {
+    caller: string;
+    callee: string;
+    callerId?: string;
+    deviceId?: string;
+  }): Promise<MutationResult> {
+    const before = await this.client.request<JsonValue>("/calls");
+    const session = await this.client.request<JsonValue>("/sessions/calls", {
+      method: "POST",
+      body: {
+        caller: input.caller,
+        callee: input.callee,
+        ...(input.callerId === undefined ? {} : { callerId: input.callerId }),
+        ...(input.deviceId === undefined ? {} : { deviceId: input.deviceId }),
+      },
+    });
+    const activeCalls = await this.client.request<JsonValue>("/calls");
+    return {
+      before: sanitize(before ?? { data: [] }),
+      after: sanitize({
+        activeCalls: activeCalls ?? { data: [] },
+        session,
+        note: "The active-calls endpoint only includes established calls, so a newly ringing call may not appear immediately.",
+      }),
+    };
+  }
+
+  private async findNumber(numberId: string): Promise<JsonObject> {
+    const response = await this.client.request<JsonValue>("/numbers", { query: { offset: 0, limit: 1000 } });
+    const number = asItems(response).find((item) => stringField(item, "id") === numberId);
+    if (!number) throw new SipgateApiError("The requested sipgate phone number was not found.", 404);
+    return number;
+  }
+
+  private async latestHistory(type: "SMS" | "CALL", phoneNumber: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/history", {
+      query: {
+        types: [type],
+        directions: ["OUTGOING"],
+        phonenumber: phoneNumber,
+        offset: 0,
+        limit: 1,
+      },
+    });
+    return asItems(response)[0] ?? null;
+  }
+}
