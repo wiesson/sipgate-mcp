@@ -3,8 +3,14 @@ import test from "node:test";
 import type {
   AddressUpdateInput,
   AuthenticatedUserContext,
+  CallEmailNotificationInput,
+  CallSmsNotificationInput,
+  CallTransferInput,
   DeviceSettingsInput,
   DeviceType,
+  FaxEmailNotificationInput,
+  FaxReportNotificationInput,
+  FaxSmsNotificationInput,
   ForwardingRule,
   HistoryQuery,
   JsonValue,
@@ -12,7 +18,12 @@ import type {
   MutationResult,
   PaginationInput,
   QuickDialInput,
+  ResendFaxInput,
+  SendFaxInput,
+  SmsEmailNotificationInput,
   TelephonyBackend,
+  VoicemailEmailNotificationInput,
+  VoicemailSmsNotificationInput,
 } from "../src/backend/telephony-backend.js";
 import { createToolDefinitions } from "../src/tools/definitions.js";
 
@@ -66,6 +77,14 @@ class FakeBackend implements TelephonyBackend {
   }
   getRouting(userId?: string): Promise<JsonValue> { return this.read("getRouting", userId); }
   getCallHistory(query: HistoryQuery): Promise<JsonValue> { return this.read("getCallHistory", query); }
+  listCalls(): Promise<JsonValue> { return this.read("listCalls"); }
+  listNotifications(userId: string): Promise<JsonValue> {
+    return this.read("listNotifications", userId);
+  }
+  listFaxlines(userId: string): Promise<JsonValue> { return this.read("listFaxlines", userId); }
+  listFaxlineNumbers(userId: string, faxlineId: string): Promise<JsonValue> {
+    return this.read("listFaxlineNumbers", userId, faxlineId);
+  }
   getSettings(userId?: string): Promise<JsonValue> { return this.read("getSettings", userId); }
   setNumberRouting(numberId: string, endpointId: string): Promise<MutationResult> {
     return this.write("setNumberRouting", numberId, endpointId);
@@ -150,6 +169,62 @@ class FakeBackend implements TelephonyBackend {
     callerId?: string;
     deviceId?: string;
   }): Promise<MutationResult> { return this.write("initiateUserCall", input); }
+  createCallEmailNotification(input: CallEmailNotificationInput): Promise<MutationResult> {
+    return this.write("createCallEmailNotification", input);
+  }
+  createCallSmsNotification(input: CallSmsNotificationInput): Promise<MutationResult> {
+    return this.write("createCallSmsNotification", input);
+  }
+  createFaxEmailNotification(input: FaxEmailNotificationInput): Promise<MutationResult> {
+    return this.write("createFaxEmailNotification", input);
+  }
+  createFaxSmsNotification(input: FaxSmsNotificationInput): Promise<MutationResult> {
+    return this.write("createFaxSmsNotification", input);
+  }
+  createFaxReportNotification(input: FaxReportNotificationInput): Promise<MutationResult> {
+    return this.write("createFaxReportNotification", input);
+  }
+  createSmsEmailNotification(input: SmsEmailNotificationInput): Promise<MutationResult> {
+    return this.write("createSmsEmailNotification", input);
+  }
+  createVoicemailEmailNotification(
+    input: VoicemailEmailNotificationInput,
+  ): Promise<MutationResult> {
+    return this.write("createVoicemailEmailNotification", input);
+  }
+  createVoicemailSmsNotification(input: VoicemailSmsNotificationInput): Promise<MutationResult> {
+    return this.write("createVoicemailSmsNotification", input);
+  }
+  deleteNotification(userId: string, notificationId: string): Promise<MutationResult> {
+    return this.write("deleteNotification", userId, notificationId);
+  }
+  hangupCall(callId: string): Promise<MutationResult> { return this.write("hangupCall", callId); }
+  setCallHold(callId: string, value: boolean): Promise<MutationResult> {
+    return this.write("setCallHold", callId, value);
+  }
+  setCallMuted(callId: string, value: boolean): Promise<MutationResult> {
+    return this.write("setCallMuted", callId, value);
+  }
+  setCallRecording(
+    callId: string,
+    value: boolean,
+    announcement?: boolean,
+  ): Promise<MutationResult> {
+    return this.write("setCallRecording", callId, value, announcement);
+  }
+  transferCall(callId: string, input: CallTransferInput): Promise<MutationResult> {
+    return this.write("transferCall", callId, input);
+  }
+  sendCallDtmf(callId: string, sequence: string): Promise<MutationResult> {
+    return this.write("sendCallDtmf", callId, sequence);
+  }
+  startCallAnnouncement(callId: string, url: string): Promise<MutationResult> {
+    return this.write("startCallAnnouncement", callId, url);
+  }
+  sendFax(input: SendFaxInput): Promise<MutationResult> { return this.write("sendFax", input); }
+  resendFax(input: ResendFaxInput): Promise<MutationResult> {
+    return this.write("resendFax", input);
+  }
 }
 
 async function invoke(backend: FakeBackend, name: string, input: unknown): Promise<JsonValue> {
@@ -471,6 +546,207 @@ test("initiate_call tool", async () => {
   }] }]);
 });
 
+const newToolCases: Array<{
+  name: string;
+  input: Record<string, unknown>;
+  method: string;
+  args: unknown[];
+}> = [
+  { name: "list_calls", input: {}, method: "listCalls", args: [] },
+  {
+    name: "list_notifications",
+    input: { user_id: "w0" },
+    method: "listNotifications",
+    args: ["w0"],
+  },
+  {
+    name: "list_faxlines",
+    input: { user_id: "w0" },
+    method: "listFaxlines",
+    args: ["w0"],
+  },
+  {
+    name: "list_faxline_numbers",
+    input: { user_id: "w0", faxline_id: "f0" },
+    method: "listFaxlineNumbers",
+    args: ["w0", "f0"],
+  },
+  {
+    name: "create_call_email_notification",
+    input: {
+      user_id: "w0",
+      endpoint_id: "e0",
+      cause: "MISSED",
+      direction: "INCOMING",
+      email: "me@example.com",
+    },
+    method: "createCallEmailNotification",
+    args: [{
+      userId: "w0",
+      endpointId: "e0",
+      cause: "MISSED",
+      direction: "INCOMING",
+      email: "me@example.com",
+    }],
+  },
+  {
+    name: "create_call_sms_notification",
+    input: {
+      user_id: "w0",
+      endpoint_id: "e0",
+      cause: "SUCCESSFUL",
+      direction: "OUTGOING",
+      number: "+4915799912345",
+    },
+    method: "createCallSmsNotification",
+    args: [{
+      userId: "w0",
+      endpointId: "e0",
+      cause: "SUCCESSFUL",
+      direction: "OUTGOING",
+      number: "+4915799912345",
+    }],
+  },
+  {
+    name: "create_fax_email_notification",
+    input: {
+      user_id: "w0",
+      faxline_id: "f0",
+      direction: "INCOMING",
+      email: "me@example.com",
+    },
+    method: "createFaxEmailNotification",
+    args: [{
+      userId: "w0",
+      faxlineId: "f0",
+      direction: "INCOMING",
+      email: "me@example.com",
+    }],
+  },
+  {
+    name: "create_fax_sms_notification",
+    input: {
+      user_id: "w0",
+      faxline_id: "f0",
+      direction: "OUTGOING",
+      number: "+4915799912345",
+    },
+    method: "createFaxSmsNotification",
+    args: [{
+      userId: "w0",
+      faxlineId: "f0",
+      direction: "OUTGOING",
+      number: "+4915799912345",
+    }],
+  },
+  {
+    name: "create_fax_report_notification",
+    input: { user_id: "w0", faxline_id: "f0", email: "me@example.com" },
+    method: "createFaxReportNotification",
+    args: [{ userId: "w0", faxlineId: "f0", email: "me@example.com" }],
+  },
+  {
+    name: "create_sms_email_notification",
+    input: { user_id: "w0", endpoint_id: "y0", email: "me@example.com" },
+    method: "createSmsEmailNotification",
+    args: [{ userId: "w0", endpointId: "y0", email: "me@example.com" }],
+  },
+  {
+    name: "create_voicemail_email_notification",
+    input: { user_id: "w0", voicemail_id: "v0", email: "me@example.com" },
+    method: "createVoicemailEmailNotification",
+    args: [{ userId: "w0", voicemailId: "v0", email: "me@example.com" }],
+  },
+  {
+    name: "create_voicemail_sms_notification",
+    input: { user_id: "w0", voicemail_id: "v0", number: "+4915799912345" },
+    method: "createVoicemailSmsNotification",
+    args: [{ userId: "w0", voicemailId: "v0", number: "+4915799912345" }],
+  },
+  {
+    name: "delete_notification",
+    input: { user_id: "w0", notification_id: "notice0" },
+    method: "deleteNotification",
+    args: ["w0", "notice0"],
+  },
+  { name: "hangup_call", input: { call_id: "c0" }, method: "hangupCall", args: ["c0"] },
+  {
+    name: "set_call_hold",
+    input: { call_id: "c0", value: true },
+    method: "setCallHold",
+    args: ["c0", true],
+  },
+  {
+    name: "set_call_muted",
+    input: { call_id: "c0", value: false },
+    method: "setCallMuted",
+    args: ["c0", false],
+  },
+  {
+    name: "set_call_recording",
+    input: { call_id: "c0", value: true, announcement: false },
+    method: "setCallRecording",
+    args: ["c0", true, false],
+  },
+  {
+    name: "transfer_call",
+    input: {
+      call_id: "c0",
+      attended: false,
+      phone_number: "+4915799912345",
+      caller_id: "+49211123456",
+    },
+    method: "transferCall",
+    args: ["c0", {
+      attended: false,
+      phoneNumber: "+4915799912345",
+      callerId: "+49211123456",
+    }],
+  },
+  {
+    name: "send_call_dtmf",
+    input: { call_id: "c0", sequence: "123#" },
+    method: "sendCallDtmf",
+    args: ["c0", "123#"],
+  },
+  {
+    name: "start_call_announcement",
+    input: { call_id: "c0", url: "https://example.com/announcement.wav" },
+    method: "startCallAnnouncement",
+    args: ["c0", "https://example.com/announcement.wav"],
+  },
+  {
+    name: "send_fax",
+    input: {
+      faxline_id: "f0",
+      recipient: "+4921112345678",
+      filename: "fax.pdf",
+      base64_content: "cGRm",
+    },
+    method: "sendFax",
+    args: [{
+      faxlineId: "f0",
+      recipient: "+4921112345678",
+      filename: "fax.pdf",
+      base64Content: "cGRm",
+    }],
+  },
+  {
+    name: "resend_fax",
+    input: { fax_id: "100018428", faxline_id: "f0" },
+    method: "resendFax",
+    args: [{ faxId: "100018428", faxlineId: "f0" }],
+  },
+];
+
+for (const tool of newToolCases) {
+  test(`${tool.name} tool`, async () => {
+    const backend = new FakeBackend();
+    await invoke(backend, tool.name, tool.input);
+    assert.deepEqual(backend.calls, [{ method: tool.method, args: tool.args }]);
+  });
+}
+
 test("read-only mode does not register write tools", () => {
   const names = createToolDefinitions(new FakeBackend(), true).map((tool) => tool.name);
   assert.deepEqual(names, [
@@ -491,6 +767,10 @@ test("read-only mode does not register write tools", () => {
     "list_address_numbers",
     "get_routing",
     "call_history",
+    "list_calls",
+    "list_notifications",
+    "list_faxlines",
+    "list_faxline_numbers",
     "get_settings",
   ]);
 });
@@ -505,6 +785,15 @@ test("tool annotations and charge warnings distinguish every read and write tool
       `${definition.name} must warn about account changes and possible charges`,
     );
   }
-  assert.equal(definitions.filter((tool) => tool.annotations.readOnlyHint).length, 18);
-  assert.equal(definitions.filter((tool) => !tool.annotations.readOnlyHint).length, 22);
+  const recording = definitions.find((tool) => tool.name === "set_call_recording");
+  assert.ok(recording);
+  assert.match(recording.description, /Germany/);
+  assert.match(recording.description, /responsible.*consent/i);
+  for (const name of ["send_fax", "resend_fax"]) {
+    const fax = definitions.find((tool) => tool.name === name);
+    assert.ok(fax);
+    assert.match(fax.description, /FAX INCURS CHARGES/);
+  }
+  assert.equal(definitions.filter((tool) => tool.annotations.readOnlyHint).length, 22);
+  assert.equal(definitions.filter((tool) => !tool.annotations.readOnlyHint).length, 40);
 });

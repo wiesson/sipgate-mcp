@@ -2,8 +2,14 @@ import { SipgateApiError, SipgateClient } from "./sipgate-client.js";
 import type {
   AddressUpdateInput,
   AuthenticatedUserContext,
+  CallEmailNotificationInput,
+  CallSmsNotificationInput,
+  CallTransferInput,
   DeviceSettingsInput,
   DeviceType,
+  FaxEmailNotificationInput,
+  FaxReportNotificationInput,
+  FaxSmsNotificationInput,
   ForwardingRule,
   HistoryQuery,
   JsonObject,
@@ -12,7 +18,12 @@ import type {
   MutationResult,
   PaginationInput,
   QuickDialInput,
+  ResendFaxInput,
+  SendFaxInput,
+  SmsEmailNotificationInput,
   TelephonyBackend,
+  VoicemailEmailNotificationInput,
+  VoicemailSmsNotificationInput,
 } from "./telephony-backend.js";
 
 interface ItemsResponse {
@@ -39,6 +50,14 @@ function asItems(value: JsonValue | undefined): JsonObject[] {
   if (!value || Array.isArray(value) || typeof value !== "object") return [];
   const items = (value as ItemsResponse).items;
   return Array.isArray(items) ? items : [];
+}
+
+function asCalls(value: JsonValue | undefined): JsonObject[] {
+  if (!value || Array.isArray(value) || typeof value !== "object") return [];
+  return Array.isArray(value.data)
+    ? value.data.filter((item): item is JsonObject =>
+      Boolean(item) && !Array.isArray(item) && typeof item === "object")
+    : [];
 }
 
 function stringField(value: JsonObject, key: string): string | undefined {
@@ -374,6 +393,30 @@ export class SipgateBackend implements TelephonyBackend {
       items,
       pagination: { offset: query.offset, limit: query.limit, totalCount, nextOffset },
     });
+  }
+
+  public async listCalls(): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/calls");
+    return sanitize(response ?? { data: [] });
+  }
+
+  public async listNotifications(userId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(
+      `/${encodeId(userId)}/notifications`,
+    );
+    return sanitize(response ?? { call: [], fax: [], sms: [], voicemail: [] });
+  }
+
+  public async listFaxlines(userId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(`/${encodeId(userId)}/faxlines`);
+    return sanitize(response ?? { items: [] });
+  }
+
+  public async listFaxlineNumbers(userId: string, faxlineId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(
+      `/${encodeId(userId)}/faxlines/${encodeId(faxlineId)}/numbers`,
+    );
+    return sanitize(response ?? { items: [] });
   }
 
   public async getSettings(userId?: string): Promise<JsonValue> {
@@ -773,6 +816,257 @@ export class SipgateBackend implements TelephonyBackend {
         requestAccepted: true,
         note: "User scope does not read the account-wide active-calls endpoint before or after Click2Dial.",
       },
+    };
+  }
+
+  public createCallEmailNotification(
+    input: CallEmailNotificationInput,
+  ): Promise<MutationResult> {
+    return this.createNotification(
+      input.userId,
+      "/call/email",
+      {
+        cause: input.cause,
+        direction: input.direction,
+        email: input.email,
+        endpointId: input.endpointId,
+      },
+    );
+  }
+
+  public createCallSmsNotification(input: CallSmsNotificationInput): Promise<MutationResult> {
+    return this.createNotification(
+      input.userId,
+      "/call/sms",
+      {
+        cause: input.cause,
+        direction: input.direction,
+        endpointId: input.endpointId,
+        number: input.number,
+      },
+    );
+  }
+
+  public createFaxEmailNotification(input: FaxEmailNotificationInput): Promise<MutationResult> {
+    return this.createNotification(
+      input.userId,
+      "/fax/email",
+      {
+        direction: input.direction,
+        email: input.email,
+        faxlineId: input.faxlineId,
+      },
+    );
+  }
+
+  public createFaxSmsNotification(input: FaxSmsNotificationInput): Promise<MutationResult> {
+    return this.createNotification(
+      input.userId,
+      "/fax/sms",
+      {
+        direction: input.direction,
+        faxlineId: input.faxlineId,
+        number: input.number,
+      },
+    );
+  }
+
+  public createFaxReportNotification(
+    input: FaxReportNotificationInput,
+  ): Promise<MutationResult> {
+    return this.createNotification(
+      input.userId,
+      "/fax/report",
+      { email: input.email, faxlineId: input.faxlineId },
+    );
+  }
+
+  public createSmsEmailNotification(input: SmsEmailNotificationInput): Promise<MutationResult> {
+    return this.createNotification(
+      input.userId,
+      "/sms/email",
+      { email: input.email, endpointId: input.endpointId },
+    );
+  }
+
+  public createVoicemailEmailNotification(
+    input: VoicemailEmailNotificationInput,
+  ): Promise<MutationResult> {
+    return this.createNotification(
+      input.userId,
+      "/voicemail/email",
+      { email: input.email, voicemailId: input.voicemailId },
+    );
+  }
+
+  public createVoicemailSmsNotification(
+    input: VoicemailSmsNotificationInput,
+  ): Promise<MutationResult> {
+    return this.createNotification(
+      input.userId,
+      "/voicemail/sms",
+      { number: input.number, voicemailId: input.voicemailId },
+    );
+  }
+
+  public async deleteNotification(
+    userId: string,
+    notificationId: string,
+  ): Promise<MutationResult> {
+    const before = await this.listNotifications(userId);
+    await this.client.request<JsonValue>(
+      `/${encodeId(userId)}/notifications/${encodeId(notificationId)}`,
+      { method: "DELETE" },
+    );
+    const after = await this.listNotifications(userId);
+    return { before, after };
+  }
+
+  public async hangupCall(callId: string): Promise<MutationResult> {
+    return this.mutateCallWithReadback(callId, `/calls/${encodeId(callId)}`, "DELETE");
+  }
+
+  public setCallHold(callId: string, value: boolean): Promise<MutationResult> {
+    return this.mutateCallWithReadback(
+      callId,
+      `/calls/${encodeId(callId)}/hold`,
+      "PUT",
+      { value },
+    );
+  }
+
+  public setCallMuted(callId: string, value: boolean): Promise<MutationResult> {
+    return this.mutateCallWithReadback(
+      callId,
+      `/calls/${encodeId(callId)}/muted`,
+      "PUT",
+      { value },
+    );
+  }
+
+  public setCallRecording(
+    callId: string,
+    value: boolean,
+    announcement?: boolean,
+  ): Promise<MutationResult> {
+    return this.mutateCallWithReadback(
+      callId,
+      `/calls/${encodeId(callId)}/recording`,
+      "PUT",
+      { value, ...(announcement === undefined ? {} : { announcement }) },
+    );
+  }
+
+  public transferCall(callId: string, input: CallTransferInput): Promise<MutationResult> {
+    return this.mutateCallWithReadback(
+      callId,
+      `/calls/${encodeId(callId)}/transfer`,
+      "POST",
+      {
+        attended: input.attended,
+        phoneNumber: input.phoneNumber,
+        ...(input.callerId === undefined ? {} : { callerId: input.callerId }),
+      },
+    );
+  }
+
+  public sendCallDtmf(callId: string, sequence: string): Promise<MutationResult> {
+    return this.mutateCallWithReadback(
+      callId,
+      `/calls/${encodeId(callId)}/dtmf`,
+      "POST",
+      { sequence },
+    );
+  }
+
+  public startCallAnnouncement(callId: string, url: string): Promise<MutationResult> {
+    return this.mutateCallWithReadback(
+      callId,
+      `/calls/${encodeId(callId)}/announcements`,
+      "POST",
+      { url },
+    );
+  }
+
+  public async sendFax(input: SendFaxInput): Promise<MutationResult> {
+    const response = await this.client.request<JsonValue>("/sessions/fax", {
+      method: "POST",
+      body: {
+        base64Content: input.base64Content,
+        faxlineId: input.faxlineId,
+        filename: input.filename,
+        recipient: input.recipient,
+      },
+    });
+    return {
+      before: null,
+      after: sanitize({
+        session: response ?? null,
+        requestAccepted: true,
+        note: "sipgate does not expose a synchronous fax-session read-back; sending a fax may incur charges.",
+      }),
+    };
+  }
+
+  public async resendFax(input: ResendFaxInput): Promise<MutationResult> {
+    const response = await this.client.request<JsonValue>("/sessions/fax/resend", {
+      method: "POST",
+      body: {
+        faxId: input.faxId,
+        ...(input.faxlineId === undefined ? {} : { faxlineId: input.faxlineId }),
+      },
+    });
+    return {
+      before: null,
+      after: sanitize({
+        response: response ?? null,
+        requestAccepted: true,
+        note: "sipgate does not document a fax-resend read-back response; resending a fax may incur charges.",
+      }),
+    };
+  }
+
+  private async createNotification(
+    userId: string,
+    suffix: string,
+    body: JsonObject,
+  ): Promise<MutationResult> {
+    const before = await this.listNotifications(userId);
+    await this.client.request<JsonValue>(
+      `/${encodeId(userId)}/notifications${suffix}`,
+      { method: "POST", body },
+    );
+    const after = await this.listNotifications(userId);
+    return { before, after };
+  }
+
+  private async findActiveCall(callId: string): Promise<JsonObject | undefined> {
+    const response = await this.client.request<JsonValue>("/calls");
+    return asCalls(response).find((call) => stringField(call, "callId") === callId);
+  }
+
+  private async mutateCallWithReadback(
+    callId: string,
+    path: string,
+    method: "POST" | "PUT" | "DELETE",
+    body?: JsonObject,
+  ): Promise<MutationResult> {
+    const before = await this.findActiveCall(callId);
+    if (!before) throw new SipgateApiError("The requested active sipgate call was not found.", 404);
+    await this.client.request<JsonValue>(path, {
+      method,
+      ...(body === undefined ? {} : { body }),
+    });
+    const after = await this.findActiveCall(callId);
+    return {
+      before: sanitize(before),
+      after: after
+        ? sanitize(after)
+        : {
+          call: null,
+          active: false,
+          note: "The call no longer appears in sipgate's established-calls list after the operation.",
+        },
     };
   }
 

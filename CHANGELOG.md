@@ -1,6 +1,18 @@
 # Changelog
 
 ## 0.5.0 - 2026-08-30
+- Add notification listing, creation, and deletion for call email/SMS, fax
+  email/SMS/report, incoming-SMS email, and voicemail email/SMS targets.
+- Expose established calls and add hangup, hold, mute, recording, transfer,
+  DTMF, and announcement controls with before/after call snapshots.
+- Add faxline and faxline-number reads plus chargeable fax send and resend
+  actions using sipgate's documented session payloads.
+- Restrict user-scoped active calls to participants matching owned devices or
+  phone numbers, verify nested notification IDs before deletion, and verify
+  faxline ownership for reads, notifications, sends, and resends. Unknown or
+  unreadable ownership fails closed.
+- Warn explicitly that fax transmission incurs charges and that call recording
+  can incur charges and requires participant consent in Germany.
 - Keep a shared emergency address from leaking or rewriting other users' data:
   user scope filters foreign numbers out of an address's number list and
   refuses to edit an address that other users' numbers are attached to.
@@ -27,8 +39,8 @@
 - Return `{before, after}` for all mutations, with explicit no-read-back notes
   for creates and deletes. Redact credential containers and the one-time
   password returned by device password rotation.
-- Expand read-only mode from seven to 18 read tools; none of the 17 new write
-  tools are registered in read-only mode.
+- Expand read-only mode from seven to 22 read tools; write tools are never
+  registered in read-only mode.
 - Bump the package, CLI, and setup skill to version 0.5.0.
 
 ## 0.4.0 - 2026-08-30

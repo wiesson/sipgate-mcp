@@ -107,7 +107,7 @@ addition to sipgate's own user role and PAT scopes:
 
 | Value | Behavior |
 | --- | --- |
-| `user` (default) | Resolves the authenticated user through `/authorization/userinfo`; returns only that user and their assigned numbers; forces user-specific device, routing, and settings reads; constrains call history to owned connection IDs; and validates every write target against owned numbers, phonelines, devices, or emergency addresses associated with an owned device/number. |
+| `user` (default) | Resolves the authenticated user through `/authorization/userinfo`; returns only that user and their assigned numbers, notifications, and faxlines; forces user-specific device, routing, and settings reads; constrains history and active calls to owned connections/participants; and validates every write target against owned numbers, phonelines, devices, faxlines, notifications, or emergency addresses associated with an owned device/number. |
 | `account` | Enables account-wide reads and writes. Startup fails unless `/users/{authenticatedUserId}` reports `admin: true`. Requires `users:read` for the administrator check. |
 
 Token scopes are permission ceilings, not role elevation. For example,
@@ -149,6 +149,10 @@ listed specific and parent scopes offered by the PAT UI when in doubt.
 | `list_address_numbers` | Read | Address ownership reads, then `GET /addresses/{addressId}/numbers` | `numbers:read`, plus user ownership read scopes |
 | `get_routing` | Read | User: own phonelines, numbers, and forwardings; account: also `GET /numbers` and `GET /users` | `phonelines:read`, `phonelines:numbers:read`, `phonelines:forwardings:read`; account also needs `numbers:read` and, when `user_id` is omitted, `users:read` |
 | `call_history` | Read | User: ownership reads for own phonelines/devices, then filtered `GET /history`; account: `GET /history` | `history:read`; user also needs `phonelines:read`, `devices:read` |
+| `list_calls` | Read | `GET /calls`; user scope filters calls to participants matching an owned device ID or phone number | `rtcm:read`; user ownership also needs `devices:read`, `numbers:read` and applicable owned-number scopes |
+| `list_notifications` | Read | `GET /{userId}/notifications` | `notifications:read` |
+| `list_faxlines` | Read | `GET /{userId}/faxlines` | `faxlines:read` |
+| `list_faxline_numbers` | Read | User: faxline ownership read, then `GET /{userId}/faxlines/{faxlineId}/numbers`; account: direct `GET` | `faxlines:read`, `faxlines:numbers:read` |
 | `get_settings` | Read | `GET /users[/userId]`, `GET /{userId}/devices`, `GET /{userId}/phonelines[/phonelineId]` | `users:read`, `devices:read`, `phonelines:read` |
 | `set_number_routing` | Write | User: pre/post reads through own phonelines; account: pre/post `GET /numbers`; all modes: `PUT /numbers/{numberId}` | `numbers:write`; user also needs `phonelines:read`, `phonelines:numbers:read`; account needs `numbers:read` |
 | `set_forwarding` | Write | User: phoneline ownership read; then pre/post forwarding reads and `PUT` | `phonelines:read`, `phonelines:write`, `phonelines:forwardings:read`, `phonelines:forwardings:write` |
@@ -172,8 +176,26 @@ listed specific and parent scopes offered by the PAT UI when in doubt.
 | `update_address` | Write | Address ownership and pre/post address reads, then `PUT /addresses/{addressId}` | `addresses:read`, `addresses:write`, plus user ownership read scopes |
 | `send_sms` | Write/action | `GET /{userId}/sms`, pre/post `GET /history`, `POST /sessions/sms` | `sms:read`, `history:read`, `sessions:write`, `sessions:sms:write` |
 | `initiate_call` | Write/action | User: device/number ownership reads, then `POST /sessions/calls`; account: pre/post `GET /calls` plus `POST` | `sessions:write`, `sessions:calls:write`; user also needs `devices:read`, `phonelines:read`, `phonelines:numbers:read`; account needs `rtcm:read` |
+| `create_call_email_notification` | Write/action | User: endpoint ownership reads; all modes: pre/post `GET /{userId}/notifications`, `POST /{userId}/notifications/call/email` | `notifications:read`, `notifications:write`; user also needs `devices:read` or `phonelines:read` |
+| `create_call_sms_notification` | Write/action | User: endpoint ownership reads; all modes: pre/post notification reads, `POST /{userId}/notifications/call/sms` | `notifications:read`, `notifications:write`; user also needs `devices:read` or `phonelines:read` |
+| `create_fax_email_notification` | Write/action | User: faxline ownership read; all modes: pre/post notification reads, `POST /{userId}/notifications/fax/email` | `notifications:read`, `notifications:write`; user also needs `faxlines:read` |
+| `create_fax_sms_notification` | Write/action | User: faxline ownership read; all modes: pre/post notification reads, `POST /{userId}/notifications/fax/sms` | `notifications:read`, `notifications:write`; user also needs `faxlines:read` |
+| `create_fax_report_notification` | Write/action | User: faxline ownership read; all modes: pre/post notification reads, `POST /{userId}/notifications/fax/report` | `notifications:read`, `notifications:write`; user also needs `faxlines:read` |
+| `create_sms_email_notification` | Write/action | Pre/post notification reads, `POST /{userId}/notifications/sms/email` | `notifications:read`, `notifications:write` |
+| `create_voicemail_email_notification` | Write/action | Pre/post notification reads, `POST /{userId}/notifications/voicemail/email` | `notifications:read`, `notifications:write` |
+| `create_voicemail_sms_notification` | Write/action | Pre/post notification reads, `POST /{userId}/notifications/voicemail/sms` | `notifications:read`, `notifications:write` |
+| `delete_notification` | Write | User: verify the nested ID in `GET /{userId}/notifications`; all modes: before/after notification reads and `DELETE /{userId}/notifications/{notificationId}` | `notifications:read`, `notifications:write` |
+| `hangup_call` | Write | User: participant ownership read; all modes: before/after `GET /calls`, `DELETE /calls/{callId}` | `rtcm:read`, `rtcm:write`; user also needs owned-device/number read scopes |
+| `set_call_hold` | Write | User: participant ownership read; before/after `GET /calls`, `PUT /calls/{callId}/hold` | `rtcm:read`, `rtcm:write`; user also needs owned-device/number read scopes |
+| `set_call_muted` | Write | User: participant ownership read; before/after `GET /calls`, `PUT /calls/{callId}/muted` | `rtcm:read`, `rtcm:write`; user also needs owned-device/number read scopes |
+| `set_call_recording` | Write | User: participant ownership read; before/after `GET /calls`, `PUT /calls/{callId}/recording` | `rtcm:read`, `rtcm:write`; user also needs owned-device/number read scopes |
+| `transfer_call` | Write/action | User: call-participant and optional caller-ID ownership reads; before/after `GET /calls`, `POST /calls/{callId}/transfer` | `rtcm:read`, `rtcm:write`; user also needs owned-device/number read scopes |
+| `send_call_dtmf` | Write/action | User: participant ownership read; before/after `GET /calls`, `POST /calls/{callId}/dtmf` | `rtcm:read`, `rtcm:write`; user also needs owned-device/number read scopes |
+| `start_call_announcement` | Write/action | User: participant ownership read; before/after `GET /calls`, `POST /calls/{callId}/announcements` | `rtcm:read`, `rtcm:write`; user also needs owned-device/number read scopes |
+| `send_fax` | Write/action | User: faxline ownership read; `POST /sessions/fax` | `sessions:write`, `sessions:fax:write`; user also needs `faxlines:read` |
+| `resend_fax` | Write/action | User: required faxline ownership read; `POST /sessions/fax/resend` | `sessions:write`, `sessions:fax:write`; user also needs `faxlines:read` |
 
-Every write tool returns a JSON object with `before` and `after`. Where a resource can be read, the tool reads current state first and reads it back after the change. Create operations use `before: null`; deletes and API operations without a documented read-back return an explicit note and acceptance/deletion marker. SMS history can update asynchronously, and `/calls` only contains established calls.
+Every write tool returns a JSON object with `before` and `after`. Where a resource can be read, the tool reads current state first and reads it back after the change. Fax send/resend operations use `before: null` and return an explicit no-read-back note; other deletes and API operations without a documented read-back return an acceptance/deletion marker. SMS history can update asynchronously, and `/calls` only contains established calls.
 
 ### Tool notes
 
@@ -181,17 +203,21 @@ Every write tool returns a JSON object with `before` and `after`. Where a resour
 - `list_user_numbers` calls the documented direct `GET /{userId}/numbers` endpoint and never uses phonelines. Ownership checks retain the device-based fallback required by accounts without a phoneline layer.
 - User scope never calls account-wide `GET /users`. It calls paginated account `GET /numbers` only for the device-based ownership fallback when phonelines are unavailable.
 - User-scoped number-routing snapshots are also resolved through owned phonelines, and user-scoped Click2Dial deliberately omits account-wide `/calls` snapshots.
+- User-scoped `list_calls` and every live-call mutation read the account-wide `/calls` feed but expose or operate on a call only when at least one participant's `participantId` matches an owned device or `phoneNumber` matches an owned phone number. A missing, unknown, or unreadable match fails closed. sipgate's Swagger does not expose a separate call-owner user or device field.
+- Notification IDs live inside the nested email/SMS/report target arrays returned by `GET /{userId}/notifications`; deletion verifies that nested ID before sending the request. Call-notification endpoints are checked against owned devices/phonelines, and fax notifications against owned faxlines.
+- Fax send and resend actions incur charges. In user scope `resend_fax` requires `faxline_id` even though sipgate marks it optional, because omitting it leaves no documented ownership relationship that can be verified before the chargeable action.
+- Call recording can incur charges and is legally sensitive. In Germany the caller is responsible for obtaining consent from every participant; disabling sipgate's announcement does not remove that responsibility.
 - Address IDs are exposed as integers because sipgate declares every address path parameter as `int32`. In user scope an address is visible or mutable only when an owned device references it, an owned number contains its `addressId`, or `/addresses/{addressId}/numbers` contains an owned number.
 - Device creation can affect billing, and changing an address can deactivate associated telephone numbers depending on country. Every write-tool description advertises the account change and potential charges.
 - Device password rotation intentionally redacts the complete credential container, including sipgate's one-time password response.
 - Number routing uses sipgate's documented `endpointId`. Obtain existing IDs from the read tools; a phoneline ID such as `p0` is the documented example.
 - `set_forwarding` replaces the complete phoneline forwarding list. Pass `forwardings: []` to remove all forwardings. A `timeout` of `0` represents immediate forwarding.
 - `send_sms` refuses to post unless `GET /{userId}/sms` returns the requested (or first available) SMS extension.
-- sipgate documents `POST /sessions/calls` as the classic-PBX Click2Dial route. The API documentation points Neo PBX accounts to `/calls`; supporting that distinct call workflow is left for a future compatibility pass.
+- sipgate documents `POST /sessions/calls` as the classic-PBX Click2Dial route. Live established-call reads and controls use `/calls`; starting a new Neo PBX call through the separate `POST /calls` shape is outside this batch.
 
 ## Read-only mode
 
-Set `SIPGATE_MCP_READONLY=1` to register only the 18 read tools. Write tools are absent from `tools/list`, rather than merely failing when called.
+Set `SIPGATE_MCP_READONLY=1` to register only the 22 read tools. Write tools are absent from `tools/list`, rather than merely failing when called.
 
 ```bash
 export SIPGATE_MCP_READONLY=1

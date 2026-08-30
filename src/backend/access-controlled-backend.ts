@@ -2,8 +2,14 @@ import type {
   AddressUpdateInput,
   AccessScope,
   AuthenticatedUserContext,
+  CallEmailNotificationInput,
+  CallSmsNotificationInput,
+  CallTransferInput,
   DeviceSettingsInput,
   DeviceType,
+  FaxEmailNotificationInput,
+  FaxReportNotificationInput,
+  FaxSmsNotificationInput,
   ForwardingRule,
   HistoryQuery,
   JsonObject,
@@ -12,7 +18,12 @@ import type {
   MutationResult,
   PaginationInput,
   QuickDialInput,
+  ResendFaxInput,
+  SendFaxInput,
+  SmsEmailNotificationInput,
   TelephonyBackend,
+  VoicemailEmailNotificationInput,
+  VoicemailSmsNotificationInput,
 } from "./telephony-backend.js";
 
 export class AccessPolicyError extends Error {
@@ -59,6 +70,27 @@ function addressIds(value: JsonObject): string[] {
 
 function items(value: JsonValue): JsonObject[] {
   return objectArray(asObject(value)?.items);
+}
+
+function calls(value: JsonValue): JsonObject[] {
+  return objectArray(asObject(value)?.data);
+}
+
+function nestedNotificationIds(value: JsonValue): Set<string> {
+  const found = new Set<string>();
+  const response = asObject(value);
+  if (!response) return found;
+  for (const category of ["call", "fax", "sms", "voicemail"]) {
+    for (const endpoint of objectArray(response[category])) {
+      for (const targetType of ["emails", "sms", "reports"]) {
+        for (const target of objectArray(endpoint[targetType])) {
+          const notificationId = stringField(target, "id");
+          if (notificationId) found.add(notificationId);
+        }
+      }
+    }
+  }
+  return found;
 }
 
 function withAccessScope(value: JsonValue, context: AuthenticatedUserContext, scope: AccessScope): JsonValue {
@@ -236,6 +268,41 @@ export class AccessControlledBackend implements TelephonyBackend {
       };
     }
     return this.delegate.getCallHistory({ ...query, connectionIds: scopedConnectionIds });
+  }
+
+  public async listCalls(): Promise<JsonValue> {
+    if (this.scope === "account") return this.delegate.listCalls();
+    try {
+      const [response, deviceIds, numbers] = await Promise.all([
+        this.delegate.listCalls(),
+        this.ownedDeviceIds(),
+        this.ownedNumbers(),
+      ]);
+      return {
+        data: calls(response).filter((call) => this.isOwnedCall(call, deviceIds, numbers)),
+      };
+    } catch (error) {
+      if (error instanceof AccessPolicyError) throw error;
+      throw new AccessPolicyError(
+        "User scope could not establish ownership of the account's active calls.",
+      );
+    }
+  }
+
+  public listNotifications(userId: string): Promise<JsonValue> {
+    this.assertUser(userId);
+    return this.delegate.listNotifications(userId);
+  }
+
+  public listFaxlines(userId: string): Promise<JsonValue> {
+    this.assertUser(userId);
+    return this.delegate.listFaxlines(userId);
+  }
+
+  public async listFaxlineNumbers(userId: string, faxlineId: string): Promise<JsonValue> {
+    this.assertUser(userId);
+    if (this.scope === "user") await this.assertOwnedFaxline(faxlineId);
+    return this.delegate.listFaxlineNumbers(userId, faxlineId);
   }
 
   public getSettings(userId?: string): Promise<JsonValue> {
@@ -485,6 +552,148 @@ export class AccessControlledBackend implements TelephonyBackend {
     return this.initiateCall(input);
   }
 
+  public async createCallEmailNotification(
+    input: CallEmailNotificationInput,
+  ): Promise<MutationResult> {
+    this.assertUser(input.userId);
+    if (this.scope === "user") await this.assertOwnedConnectionId(input.endpointId);
+    return this.delegate.createCallEmailNotification(input);
+  }
+
+  public async createCallSmsNotification(
+    input: CallSmsNotificationInput,
+  ): Promise<MutationResult> {
+    this.assertUser(input.userId);
+    if (this.scope === "user") await this.assertOwnedConnectionId(input.endpointId);
+    return this.delegate.createCallSmsNotification(input);
+  }
+
+  public async createFaxEmailNotification(
+    input: FaxEmailNotificationInput,
+  ): Promise<MutationResult> {
+    this.assertUser(input.userId);
+    if (this.scope === "user") await this.assertOwnedFaxline(input.faxlineId);
+    return this.delegate.createFaxEmailNotification(input);
+  }
+
+  public async createFaxSmsNotification(
+    input: FaxSmsNotificationInput,
+  ): Promise<MutationResult> {
+    this.assertUser(input.userId);
+    if (this.scope === "user") await this.assertOwnedFaxline(input.faxlineId);
+    return this.delegate.createFaxSmsNotification(input);
+  }
+
+  public async createFaxReportNotification(
+    input: FaxReportNotificationInput,
+  ): Promise<MutationResult> {
+    this.assertUser(input.userId);
+    if (this.scope === "user") await this.assertOwnedFaxline(input.faxlineId);
+    return this.delegate.createFaxReportNotification(input);
+  }
+
+  public createSmsEmailNotification(input: SmsEmailNotificationInput): Promise<MutationResult> {
+    this.assertUser(input.userId);
+    return this.delegate.createSmsEmailNotification(input);
+  }
+
+  public createVoicemailEmailNotification(
+    input: VoicemailEmailNotificationInput,
+  ): Promise<MutationResult> {
+    this.assertUser(input.userId);
+    return this.delegate.createVoicemailEmailNotification(input);
+  }
+
+  public createVoicemailSmsNotification(
+    input: VoicemailSmsNotificationInput,
+  ): Promise<MutationResult> {
+    this.assertUser(input.userId);
+    return this.delegate.createVoicemailSmsNotification(input);
+  }
+
+  public async deleteNotification(
+    userId: string,
+    notificationId: string,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (this.scope === "user") {
+      try {
+        const ownedIds = nestedNotificationIds(await this.delegate.listNotifications(userId));
+        this.assertOwned(ownedIds, notificationId, "notification");
+      } catch (error) {
+        if (error instanceof AccessPolicyError) throw error;
+        throw new AccessPolicyError(
+          "User scope could not establish ownership of the requested notification.",
+        );
+      }
+    }
+    return this.delegate.deleteNotification(userId, notificationId);
+  }
+
+  public async hangupCall(callId: string): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedCall(callId);
+    return this.delegate.hangupCall(callId);
+  }
+
+  public async setCallHold(callId: string, value: boolean): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedCall(callId);
+    return this.delegate.setCallHold(callId, value);
+  }
+
+  public async setCallMuted(callId: string, value: boolean): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedCall(callId);
+    return this.delegate.setCallMuted(callId, value);
+  }
+
+  public async setCallRecording(
+    callId: string,
+    value: boolean,
+    announcement?: boolean,
+  ): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedCall(callId);
+    return this.delegate.setCallRecording(callId, value, announcement);
+  }
+
+  public async transferCall(
+    callId: string,
+    input: CallTransferInput,
+  ): Promise<MutationResult> {
+    if (this.scope === "user") {
+      await this.assertOwnedCall(callId);
+      if (input.callerId !== undefined) {
+        await this.assertOwnedPhoneNumber(input.callerId, "transfer caller ID phone number");
+      }
+    }
+    return this.delegate.transferCall(callId, input);
+  }
+
+  public async sendCallDtmf(callId: string, sequence: string): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedCall(callId);
+    return this.delegate.sendCallDtmf(callId, sequence);
+  }
+
+  public async startCallAnnouncement(callId: string, url: string): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedCall(callId);
+    return this.delegate.startCallAnnouncement(callId, url);
+  }
+
+  public async sendFax(input: SendFaxInput): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedFaxline(input.faxlineId);
+    return this.delegate.sendFax(input);
+  }
+
+  public async resendFax(input: ResendFaxInput): Promise<MutationResult> {
+    if (this.scope === "user") {
+      if (!input.faxlineId) {
+        throw new AccessPolicyError(
+          "User scope requires a faxline ID to establish ownership before resending a fax.",
+        );
+      }
+      await this.assertOwnedFaxline(input.faxlineId);
+    }
+    return this.delegate.resendFax(input);
+  }
+
   private assertUser(userId: string | undefined): void {
     if (this.scope === "account" || userId === undefined || userId === this.context.userId) return;
     throw new AccessPolicyError(
@@ -505,6 +714,68 @@ export class AccessControlledBackend implements TelephonyBackend {
       this.ownedDeviceIds(),
     ]);
     return new Set([...phonelineIds, ...deviceIds]);
+  }
+
+  private async assertOwnedConnectionId(connectionId: string): Promise<void> {
+    try {
+      this.assertOwned(await this.ownedConnectionIds(), connectionId, "notification endpoint");
+    } catch (error) {
+      if (error instanceof AccessPolicyError) throw error;
+      throw new AccessPolicyError(
+        "User scope could not establish ownership of the requested notification endpoint.",
+      );
+    }
+  }
+
+  private async assertOwnedFaxline(faxlineId: string): Promise<void> {
+    try {
+      const response = await this.delegate.listFaxlines(this.context.userId);
+      const faxlineIds = new Set(
+        items(response)
+          .map((faxline) => stringField(faxline, "id"))
+          .filter((id): id is string => Boolean(id)),
+      );
+      this.assertOwned(faxlineIds, faxlineId, "faxline");
+    } catch (error) {
+      if (error instanceof AccessPolicyError) throw error;
+      throw new AccessPolicyError(
+        "User scope could not establish ownership of the requested faxline.",
+      );
+    }
+  }
+
+  private async assertOwnedCall(callId: string): Promise<void> {
+    try {
+      const [response, deviceIds, numbers] = await Promise.all([
+        this.delegate.listCalls(),
+        this.ownedDeviceIds(),
+        this.ownedNumbers(),
+      ]);
+      const call = calls(response).find((candidate) => stringField(candidate, "callId") === callId);
+      if (call && this.isOwnedCall(call, deviceIds, numbers)) return;
+      throw new AccessPolicyError(
+        "User scope does not permit access to the requested active call.",
+      );
+    } catch (error) {
+      if (error instanceof AccessPolicyError) throw error;
+      throw new AccessPolicyError(
+        "User scope could not establish ownership of the requested active call.",
+      );
+    }
+  }
+
+  private isOwnedCall(
+    call: JsonObject,
+    deviceIds: Set<string>,
+    numbers: OwnedNumbers,
+  ): boolean {
+    const participants = objectArray(call.participants);
+    return participants.some((participant) => {
+      const participantId = stringField(participant, "participantId");
+      const phoneNumber = stringField(participant, "phoneNumber");
+      return (participantId !== undefined && deviceIds.has(participantId))
+        || (phoneNumber !== undefined && numbers.phoneNumbers.has(phoneNumber));
+    });
   }
 
   private async ownedPhonelineIds(): Promise<Set<string>> {

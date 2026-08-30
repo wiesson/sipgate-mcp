@@ -36,10 +36,14 @@ Run only one install command. Confirm that `sipgate-mcp --version` reports
   tools, and do not pass `--allow-writes` on the user's behalf. Never enable
   account-wide administrator access without an explicit user request.
 - User scope remains the resource boundary for write tools: device IDs,
-  phone-number IDs, and emergency-address IDs are checked against the
-  authenticated user's ownership before account changes are sent.
+  phone-number IDs, emergency-address IDs, notification IDs, live-call
+  participants, and faxline IDs are checked against the authenticated user's
+  ownership before account changes are sent.
 - Never display device credentials. Password rotation deliberately redacts the
   one-time password returned by sipgate.
+- Fax send/resend actions incur charges. Call recording may incur charges and
+  is legally sensitive; in Germany the caller is responsible for obtaining
+  every participant's consent, even when the recording announcement is off.
 - Do not remove or replace an existing MCP configuration without the user's
   approval.
 
@@ -64,11 +68,15 @@ user-scoped stdio server. Its interactive prompt asks whether write tools should
 be enabled; do not answer that choice on the user's behalf. The client starts
 and stops that process, so do not launch `sipgate-mcp` as a daemon.
 
-Version 0.5.0 adds user-scoped device, quick-dial, user-number, and emergency-
-address self-service. It supports accounts without phonelines: direct number
-reads use `/{userId}/numbers`, while ownership checks retain the device-based
-number fallback. Device creation and other writes may incur charges, and
-address changes can deactivate associated numbers depending on country.
+Version 0.5.0 adds user-scoped device, quick-dial, user-number, emergency-
+address, notification, live-call-control, and fax self-service. It supports
+accounts without phonelines: direct number reads use `/{userId}/numbers`, while
+ownership checks retain the device-based number fallback. Active calls are
+filtered by participants matching owned devices or numbers; notifications and
+faxlines are verified against the authenticated user. Device creation, fax
+transmission, recording, and other writes may incur charges or carry legal
+consequences, and address changes can deactivate associated numbers depending
+on country.
 
 When credentials already exist in Keychain, setup reuses them without another
 prompt. Use `--replace-credentials` only when the user explicitly wants to

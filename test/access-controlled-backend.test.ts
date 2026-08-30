@@ -7,8 +7,14 @@ import {
 import type {
   AddressUpdateInput,
   AuthenticatedUserContext,
+  CallEmailNotificationInput,
+  CallSmsNotificationInput,
+  CallTransferInput,
   DeviceSettingsInput,
   DeviceType,
+  FaxEmailNotificationInput,
+  FaxReportNotificationInput,
+  FaxSmsNotificationInput,
   ForwardingRule,
   HistoryQuery,
   JsonObject,
@@ -17,7 +23,12 @@ import type {
   MutationResult,
   PaginationInput,
   QuickDialInput,
+  ResendFaxInput,
+  SendFaxInput,
+  SmsEmailNotificationInput,
   TelephonyBackend,
+  VoicemailEmailNotificationInput,
+  VoicemailSmsNotificationInput,
 } from "../src/backend/telephony-backend.js";
 
 function itemsFrom(value: JsonValue): JsonObject[] {
@@ -46,6 +57,25 @@ class FakeBackend implements TelephonyBackend {
   public addresses: JsonValue = {
     items: [{ addressId: "123" }, { addressId: "999" }],
   };
+  public activeCalls: JsonValue = {
+    data: [
+      {
+        callId: "c0",
+        participants: [{ participantId: "e0", phoneNumber: "+49211123456" }],
+      },
+      {
+        callId: "c9",
+        participants: [{ participantId: "e9", phoneNumber: "+49211999999" }],
+      },
+    ],
+  };
+  public notifications: JsonValue = {
+    call: [{ endpointId: "e0", emails: [{ id: "notice0", email: "me@example.com" }] }],
+    fax: [],
+    sms: [],
+    voicemail: [],
+  };
+  public faxlines: JsonValue = { items: [{ id: "f0", canSend: true }] };
 
   private record(method: string, args: unknown[], result: JsonValue): Promise<JsonValue> {
     this.calls.push({ method, args });
@@ -137,6 +167,18 @@ class FakeBackend implements TelephonyBackend {
   }
   getCallHistory(query: HistoryQuery): Promise<JsonValue> {
     return this.record("getCallHistory", [query], { items: [{ id: "h0" }] });
+  }
+  listCalls(): Promise<JsonValue> { return this.record("listCalls", [], this.activeCalls); }
+  listNotifications(userId: string): Promise<JsonValue> {
+    return this.record("listNotifications", [userId], this.notifications);
+  }
+  listFaxlines(userId: string): Promise<JsonValue> {
+    return this.record("listFaxlines", [userId], this.faxlines);
+  }
+  listFaxlineNumbers(userId: string, faxlineId: string): Promise<JsonValue> {
+    return this.record("listFaxlineNumbers", [userId, faxlineId], {
+      items: [{ id: "fn0", number: "+49211123456" }],
+    });
   }
   getSettings(userId?: string): Promise<JsonValue> {
     return this.record("getSettings", [userId], { users: [{ user: { id: userId ?? null } }] });
@@ -231,6 +273,66 @@ class FakeBackend implements TelephonyBackend {
     deviceId?: string;
   }): Promise<MutationResult> {
     return this.mutation("initiateUserCall", [input]);
+  }
+  createCallEmailNotification(input: CallEmailNotificationInput): Promise<MutationResult> {
+    return this.mutation("createCallEmailNotification", [input]);
+  }
+  createCallSmsNotification(input: CallSmsNotificationInput): Promise<MutationResult> {
+    return this.mutation("createCallSmsNotification", [input]);
+  }
+  createFaxEmailNotification(input: FaxEmailNotificationInput): Promise<MutationResult> {
+    return this.mutation("createFaxEmailNotification", [input]);
+  }
+  createFaxSmsNotification(input: FaxSmsNotificationInput): Promise<MutationResult> {
+    return this.mutation("createFaxSmsNotification", [input]);
+  }
+  createFaxReportNotification(input: FaxReportNotificationInput): Promise<MutationResult> {
+    return this.mutation("createFaxReportNotification", [input]);
+  }
+  createSmsEmailNotification(input: SmsEmailNotificationInput): Promise<MutationResult> {
+    return this.mutation("createSmsEmailNotification", [input]);
+  }
+  createVoicemailEmailNotification(
+    input: VoicemailEmailNotificationInput,
+  ): Promise<MutationResult> {
+    return this.mutation("createVoicemailEmailNotification", [input]);
+  }
+  createVoicemailSmsNotification(input: VoicemailSmsNotificationInput): Promise<MutationResult> {
+    return this.mutation("createVoicemailSmsNotification", [input]);
+  }
+  deleteNotification(userId: string, notificationId: string): Promise<MutationResult> {
+    return this.mutation("deleteNotification", [userId, notificationId]);
+  }
+  hangupCall(callId: string): Promise<MutationResult> {
+    return this.mutation("hangupCall", [callId]);
+  }
+  setCallHold(callId: string, value: boolean): Promise<MutationResult> {
+    return this.mutation("setCallHold", [callId, value]);
+  }
+  setCallMuted(callId: string, value: boolean): Promise<MutationResult> {
+    return this.mutation("setCallMuted", [callId, value]);
+  }
+  setCallRecording(
+    callId: string,
+    value: boolean,
+    announcement?: boolean,
+  ): Promise<MutationResult> {
+    return this.mutation("setCallRecording", [callId, value, announcement]);
+  }
+  transferCall(callId: string, input: CallTransferInput): Promise<MutationResult> {
+    return this.mutation("transferCall", [callId, input]);
+  }
+  sendCallDtmf(callId: string, sequence: string): Promise<MutationResult> {
+    return this.mutation("sendCallDtmf", [callId, sequence]);
+  }
+  startCallAnnouncement(callId: string, url: string): Promise<MutationResult> {
+    return this.mutation("startCallAnnouncement", [callId, url]);
+  }
+  sendFax(input: SendFaxInput): Promise<MutationResult> {
+    return this.mutation("sendFax", [input]);
+  }
+  resendFax(input: ResendFaxInput): Promise<MutationResult> {
+    return this.mutation("resendFax", [input]);
   }
 }
 
@@ -526,6 +628,35 @@ test("user-scoped mutations fail closed with AccessPolicyError when ownership ca
     countrycode: "DE",
     postcode: "40219",
   }), AccessPolicyError);
+
+  const notificationDelegate = new FakeBackend();
+  notificationDelegate.listNotifications = async () => {
+    throw new Error("notification lookup unavailable");
+  };
+  const notificationBackend = await createAccessControlledBackend(notificationDelegate, "user");
+  await assert.rejects(
+    notificationBackend.deleteNotification("w0", "notice0"),
+    AccessPolicyError,
+  );
+
+  const callDelegate = new FakeBackend();
+  callDelegate.listCalls = async () => {
+    throw new Error("call lookup unavailable");
+  };
+  const callBackend = await createAccessControlledBackend(callDelegate, "user");
+  await assert.rejects(callBackend.hangupCall("c0"), AccessPolicyError);
+
+  const faxDelegate = new FakeBackend();
+  faxDelegate.listFaxlines = async () => {
+    throw new Error("faxline lookup unavailable");
+  };
+  const faxBackend = await createAccessControlledBackend(faxDelegate, "user");
+  await assert.rejects(faxBackend.sendFax({
+    faxlineId: "f0",
+    recipient: "+4921112345678",
+    filename: "fax.pdf",
+    base64Content: "cGRm",
+  }), AccessPolicyError);
 });
 
 test("user scope hides foreign numbers attached to a shared address", async () => {
@@ -608,4 +739,71 @@ test("user scope pages through every owned number before deciding ownership", as
   await backend.setNumberRouting("n1000", "e0");
 
   assert.equal(delegate.calls.some((call) => call.method === "setUserNumberRouting"), true);
+});
+
+test("user scope rejects a foreign notification ID", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await assert.rejects(
+    backend.deleteNotification("w0", "foreign-notice"),
+    (error: unknown) => error instanceof AccessPolicyError && /notification/.test(error.message),
+  );
+  assert.equal(delegate.calls.some((call) => call.method === "deleteNotification"), false);
+});
+
+test("user scope filters active calls and rejects a foreign call ID", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  assert.deepEqual(await backend.listCalls(), {
+    data: [{
+      callId: "c0",
+      participants: [{ participantId: "e0", phoneNumber: "+49211123456" }],
+    }],
+  });
+  const mutations: Array<() => Promise<unknown>> = [
+    () => backend.hangupCall("c9"),
+    () => backend.setCallHold("c9", true),
+    () => backend.setCallMuted("c9", true),
+    () => backend.setCallRecording("c9", true, true),
+    () => backend.transferCall("c9", { attended: false, phoneNumber: "+4915799912345" }),
+    () => backend.sendCallDtmf("c9", "123"),
+    () => backend.startCallAnnouncement("c9", "https://example.com/announcement.wav"),
+  ];
+  for (const mutation of mutations) {
+    await assert.rejects(
+      mutation(),
+      (error: unknown) => error instanceof AccessPolicyError && /call/.test(error.message),
+    );
+  }
+  assert.equal(delegate.calls.some((call) => [
+    "hangupCall",
+    "setCallHold",
+    "setCallMuted",
+    "setCallRecording",
+    "transferCall",
+    "sendCallDtmf",
+    "startCallAnnouncement",
+  ].includes(call.method)), false);
+});
+
+test("user scope rejects a foreign faxline", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await assert.rejects(
+    backend.listFaxlineNumbers("w0", "f9"),
+    (error: unknown) => error instanceof AccessPolicyError && /faxline/.test(error.message),
+  );
+  await assert.rejects(
+    backend.sendFax({
+      faxlineId: "f9",
+      recipient: "+4921112345678",
+      filename: "fax.pdf",
+      base64Content: "cGRm",
+    }),
+    AccessPolicyError,
+  );
+  assert.equal(delegate.calls.some((call) => ["listFaxlineNumbers", "sendFax"].includes(call.method)), false);
 });

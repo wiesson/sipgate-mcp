@@ -434,6 +434,22 @@ const readEndpointCases: Array<{
     path: "/v2/numbers/quickdial/validation/42",
     run: (backend) => backend.validateQuickDialNumber("42"),
   },
+  { name: "list_calls", path: "/v2/calls", run: (backend) => backend.listCalls() },
+  {
+    name: "list_notifications",
+    path: "/v2/w0/notifications",
+    run: (backend) => backend.listNotifications("w0"),
+  },
+  {
+    name: "list_faxlines",
+    path: "/v2/w0/faxlines",
+    run: (backend) => backend.listFaxlines("w0"),
+  },
+  {
+    name: "list_faxline_numbers",
+    path: "/v2/w0/faxlines/f0/numbers",
+    run: (backend) => backend.listFaxlineNumbers("w0", "f0"),
+  },
 ];
 
 for (const endpoint of readEndpointCases) {
@@ -674,6 +690,296 @@ test("SipgateBackend implements delete_quick_dial with a before snapshot", async
   assert.equal((result.after as { deleted?: boolean }).deleted, true);
   assert.equal(new URL(requests[1]?.url ?? "").pathname, "/v2/numbers/quickdial/n0");
   assert.equal(requests[1]?.method, "DELETE");
+});
+
+const notificationMutationCases: Array<{
+  name: string;
+  path: string;
+  body: JsonValue;
+  run: (backend: SipgateBackend) => Promise<MutationResult>;
+}> = [
+  {
+    name: "create_call_email_notification",
+    path: "/v2/w0/notifications/call/email",
+    body: {
+      cause: "MISSED",
+      direction: "INCOMING",
+      email: "me@example.com",
+      endpointId: "e0",
+    },
+    run: (backend) => backend.createCallEmailNotification({
+      userId: "w0",
+      endpointId: "e0",
+      cause: "MISSED",
+      direction: "INCOMING",
+      email: "me@example.com",
+    }),
+  },
+  {
+    name: "create_call_sms_notification",
+    path: "/v2/w0/notifications/call/sms",
+    body: {
+      cause: "SUCCESSFUL",
+      direction: "OUTGOING",
+      endpointId: "e0",
+      number: "+4915799912345",
+    },
+    run: (backend) => backend.createCallSmsNotification({
+      userId: "w0",
+      endpointId: "e0",
+      cause: "SUCCESSFUL",
+      direction: "OUTGOING",
+      number: "+4915799912345",
+    }),
+  },
+  {
+    name: "create_fax_email_notification",
+    path: "/v2/w0/notifications/fax/email",
+    body: {
+      direction: "INCOMING",
+      email: "me@example.com",
+      faxlineId: "f0",
+    },
+    run: (backend) => backend.createFaxEmailNotification({
+      userId: "w0",
+      faxlineId: "f0",
+      direction: "INCOMING",
+      email: "me@example.com",
+    }),
+  },
+  {
+    name: "create_fax_sms_notification",
+    path: "/v2/w0/notifications/fax/sms",
+    body: {
+      direction: "OUTGOING",
+      faxlineId: "f0",
+      number: "+4915799912345",
+    },
+    run: (backend) => backend.createFaxSmsNotification({
+      userId: "w0",
+      faxlineId: "f0",
+      direction: "OUTGOING",
+      number: "+4915799912345",
+    }),
+  },
+  {
+    name: "create_fax_report_notification",
+    path: "/v2/w0/notifications/fax/report",
+    body: { email: "me@example.com", faxlineId: "f0" },
+    run: (backend) => backend.createFaxReportNotification({
+      userId: "w0",
+      faxlineId: "f0",
+      email: "me@example.com",
+    }),
+  },
+  {
+    name: "create_sms_email_notification",
+    path: "/v2/w0/notifications/sms/email",
+    body: { email: "me@example.com", endpointId: "y0" },
+    run: (backend) => backend.createSmsEmailNotification({
+      userId: "w0",
+      endpointId: "y0",
+      email: "me@example.com",
+    }),
+  },
+  {
+    name: "create_voicemail_email_notification",
+    path: "/v2/w0/notifications/voicemail/email",
+    body: { email: "me@example.com", voicemailId: "v0" },
+    run: (backend) => backend.createVoicemailEmailNotification({
+      userId: "w0",
+      voicemailId: "v0",
+      email: "me@example.com",
+    }),
+  },
+  {
+    name: "create_voicemail_sms_notification",
+    path: "/v2/w0/notifications/voicemail/sms",
+    body: { number: "+4915799912345", voicemailId: "v0" },
+    run: (backend) => backend.createVoicemailSmsNotification({
+      userId: "w0",
+      voicemailId: "v0",
+      number: "+4915799912345",
+    }),
+  },
+];
+
+for (const endpoint of notificationMutationCases) {
+  test(`SipgateBackend implements the ${endpoint.name} tool endpoint`, async () => {
+    const { backend, requests } = backendWithResponses([
+      { call: [], fax: [], sms: [], voicemail: [] },
+      null,
+      { call: [{ endpointId: "e0" }], fax: [], sms: [], voicemail: [] },
+    ]);
+
+    const result = await endpoint.run(backend);
+
+    assert.deepEqual(result.before, { call: [], fax: [], sms: [], voicemail: [] });
+    assert.deepEqual(requests.map((request) => ({
+      method: request.method,
+      path: new URL(request.url).pathname,
+    })), [
+      { method: "GET", path: "/v2/w0/notifications" },
+      { method: "POST", path: endpoint.path },
+      { method: "GET", path: "/v2/w0/notifications" },
+    ]);
+    assert.equal(requests[1]?.body, JSON.stringify(endpoint.body));
+  });
+}
+
+test("SipgateBackend implements the delete_notification tool endpoint", async () => {
+  const before = {
+    call: [{ endpointId: "e0", emails: [{ id: "notice0" }] }],
+    fax: [],
+    sms: [],
+    voicemail: [],
+  };
+  const after = { call: [], fax: [], sms: [], voicemail: [] };
+  const { backend, requests } = backendWithResponses([before, null, after]);
+
+  assert.deepEqual(await backend.deleteNotification("w0", "notice0"), { before, after });
+  assert.deepEqual(requests.map((request) => ({
+    method: request.method,
+    path: new URL(request.url).pathname,
+  })), [
+    { method: "GET", path: "/v2/w0/notifications" },
+    { method: "DELETE", path: "/v2/w0/notifications/notice0" },
+    { method: "GET", path: "/v2/w0/notifications" },
+  ]);
+});
+
+const callMutationCases: Array<{
+  name: string;
+  method: "POST" | "PUT" | "DELETE";
+  path: string;
+  body?: JsonValue;
+  run: (backend: SipgateBackend) => Promise<MutationResult>;
+}> = [
+  {
+    name: "hangup_call",
+    method: "DELETE",
+    path: "/v2/calls/c0",
+    run: (backend) => backend.hangupCall("c0"),
+  },
+  {
+    name: "set_call_hold",
+    method: "PUT",
+    path: "/v2/calls/c0/hold",
+    body: { value: true },
+    run: (backend) => backend.setCallHold("c0", true),
+  },
+  {
+    name: "set_call_muted",
+    method: "PUT",
+    path: "/v2/calls/c0/muted",
+    body: { value: false },
+    run: (backend) => backend.setCallMuted("c0", false),
+  },
+  {
+    name: "set_call_recording",
+    method: "PUT",
+    path: "/v2/calls/c0/recording",
+    body: { value: true, announcement: false },
+    run: (backend) => backend.setCallRecording("c0", true, false),
+  },
+  {
+    name: "transfer_call",
+    method: "POST",
+    path: "/v2/calls/c0/transfer",
+    body: {
+      attended: false,
+      phoneNumber: "+4915799912345",
+      callerId: "+49211123456",
+    },
+    run: (backend) => backend.transferCall("c0", {
+      attended: false,
+      phoneNumber: "+4915799912345",
+      callerId: "+49211123456",
+    }),
+  },
+  {
+    name: "send_call_dtmf",
+    method: "POST",
+    path: "/v2/calls/c0/dtmf",
+    body: { sequence: "123#" },
+    run: (backend) => backend.sendCallDtmf("c0", "123#"),
+  },
+  {
+    name: "start_call_announcement",
+    method: "POST",
+    path: "/v2/calls/c0/announcements",
+    body: { url: "https://example.com/announcement.wav" },
+    run: (backend) => backend.startCallAnnouncement(
+      "c0",
+      "https://example.com/announcement.wav",
+    ),
+  },
+];
+
+for (const endpoint of callMutationCases) {
+  test(`SipgateBackend implements the ${endpoint.name} tool endpoint`, async () => {
+    const before = { callId: "c0", participants: [], recording: false };
+    const after = { callId: "c0", participants: [], recording: true };
+    const { backend, requests } = backendWithResponses([
+      { data: [before] },
+      null,
+      { data: endpoint.name === "hangup_call" ? [] : [after] },
+    ]);
+
+    const result = await endpoint.run(backend);
+
+    assert.deepEqual(result.before, before);
+    if (endpoint.name === "hangup_call") {
+      assert.equal((result.after as { active?: boolean }).active, false);
+    } else {
+      assert.deepEqual(result.after, after);
+    }
+    assert.deepEqual(requests.map((request) => ({
+      method: request.method,
+      path: new URL(request.url).pathname,
+    })), [
+      { method: "GET", path: "/v2/calls" },
+      { method: endpoint.method, path: endpoint.path },
+      { method: "GET", path: "/v2/calls" },
+    ]);
+    assert.equal(requests[1]?.body, endpoint.body === undefined
+      ? undefined
+      : JSON.stringify(endpoint.body));
+  });
+}
+
+test("SipgateBackend implements the send_fax tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([{ sessionId: "fax-session" }]);
+
+  const result = await backend.sendFax({
+    faxlineId: "f0",
+    recipient: "+4921112345678",
+    filename: "fax.pdf",
+    base64Content: "cGRm",
+  });
+
+  assert.equal(result.before, null);
+  assert.match(JSON.stringify(result.after), /charges/);
+  assert.equal(requests[0]?.method, "POST");
+  assert.equal(new URL(requests[0]?.url ?? "").pathname, "/v2/sessions/fax");
+  assert.equal(requests[0]?.body, JSON.stringify({
+    base64Content: "cGRm",
+    faxlineId: "f0",
+    filename: "fax.pdf",
+    recipient: "+4921112345678",
+  }));
+});
+
+test("SipgateBackend implements the resend_fax tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([null]);
+
+  const result = await backend.resendFax({ faxId: "100018428", faxlineId: "f0" });
+
+  assert.equal(result.before, null);
+  assert.match(JSON.stringify(result.after), /charges/);
+  assert.equal(requests[0]?.method, "POST");
+  assert.equal(new URL(requests[0]?.url ?? "").pathname, "/v2/sessions/fax/resend");
+  assert.equal(requests[0]?.body, JSON.stringify({ faxId: "100018428", faxlineId: "f0" }));
 });
 
 test("SipgateBackend redacts SIM secrets that arrive outside a credentials wrapper", async () => {

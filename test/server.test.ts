@@ -29,6 +29,10 @@ function backend(): TelephonyBackend {
     validateQuickDialNumber: async () => ({}),
     getRouting: async () => ({ numbers: [], users: [] }),
     getCallHistory: async () => ({ items: [] }),
+    listCalls: async () => ({ data: [] }),
+    listNotifications: async () => ({ call: [], fax: [], sms: [], voicemail: [] }),
+    listFaxlines: async () => ({ items: [] }),
+    listFaxlineNumbers: async () => ({ items: [] }),
     getSettings: async () => ({ users: [] }),
     setNumberRouting: mutation,
     setUserNumberRouting: mutation,
@@ -54,6 +58,24 @@ function backend(): TelephonyBackend {
     sendSms: mutation,
     initiateCall: mutation,
     initiateUserCall: mutation,
+    createCallEmailNotification: mutation,
+    createCallSmsNotification: mutation,
+    createFaxEmailNotification: mutation,
+    createFaxSmsNotification: mutation,
+    createFaxReportNotification: mutation,
+    createSmsEmailNotification: mutation,
+    createVoicemailEmailNotification: mutation,
+    createVoicemailSmsNotification: mutation,
+    deleteNotification: mutation,
+    hangupCall: mutation,
+    setCallHold: mutation,
+    setCallMuted: mutation,
+    setCallRecording: mutation,
+    transferCall: mutation,
+    sendCallDtmf: mutation,
+    startCallAnnouncement: mutation,
+    sendFax: mutation,
+    resendFax: mutation,
   };
 }
 
@@ -66,7 +88,7 @@ test("MCP server lists JSON-schema tools and executes a tool over the SDK transp
 
   try {
     const listed = await client.listTools();
-    assert.equal(listed.tools.length, 40);
+    assert.equal(listed.tools.length, 62);
     assert.equal(listed.tools.find((tool) => tool.name === "call_history")?.inputSchema.type, "object");
     assert.equal(client.getServerVersion()?.version, "0.5.0");
     assert.match(client.getInstructions() ?? "", /authenticated user's resources/);
@@ -91,7 +113,7 @@ test("MCP server advertises administrator account scope and read-only mode", asy
     assert.match(client.getInstructions() ?? "", /account scope/);
     assert.match(client.getInstructions() ?? "", /administrator/);
     assert.match(client.getInstructions() ?? "", /read-only/);
-    assert.equal((await client.listTools()).tools.length, 18);
+    assert.equal((await client.listTools()).tools.length, 22);
   } finally {
     await client.close();
     await server.close();

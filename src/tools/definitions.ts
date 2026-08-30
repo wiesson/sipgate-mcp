@@ -90,7 +90,7 @@ export function createToolDefinitions(
     define({
       name: "list_numbers",
       description: userScoped
-        ? "List phone numbers assigned to the authenticated user's phonelines and their endpoint assignments."
+        ? "List phone numbers assigned to the authenticated user and their endpoint assignments, including device-based accounts without phonelines."
         : "List all sipgate phone numbers and their current endpoint assignments.",
       schema: z.object({
         offset: z.int().min(0).default(0).describe("Zero-based pagination offset"),
@@ -244,6 +244,50 @@ export function createToolDefinitions(
           ...(phone_number === undefined ? {} : { phoneNumber: phone_number }),
           ...(connection_ids === undefined ? {} : { connectionIds: connection_ids }),
         }),
+    }),
+    define({
+      name: "list_calls",
+      description: userScoped
+        ? "List currently established calls whose participants match the authenticated user's owned devices or phone numbers. Ringing calls and voicemail recordings are not included by sipgate."
+        : "List all currently established account calls. Ringing calls and voicemail recordings are not included by sipgate.",
+      schema: z.object({}),
+      annotations: readAnnotations,
+      execute: async () => backend.listCalls(),
+    }),
+    define({
+      name: "list_notifications",
+      description: "List call, fax, SMS, and voicemail notifications for one sipgate user.",
+      schema: z.object({
+        user_id: id.describe(userScoped
+          ? "Authenticated sipgate user ID; another user's ID is rejected"
+          : "sipgate user ID, for example w0"),
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_id }) => backend.listNotifications(user_id),
+    }),
+    define({
+      name: "list_faxlines",
+      description: "List faxlines belonging to one sipgate user, including send/receive capability.",
+      schema: z.object({
+        user_id: id.describe(userScoped
+          ? "Authenticated sipgate user ID; another user's ID is rejected"
+          : "sipgate user ID, for example w0"),
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_id }) => backend.listFaxlines(user_id),
+    }),
+    define({
+      name: "list_faxline_numbers",
+      description: "List phone numbers routed to an owned faxline.",
+      schema: z.object({
+        user_id: id.describe(userScoped
+          ? "Authenticated sipgate user ID; another user's ID is rejected"
+          : "Faxline owner user ID, for example w0"),
+        faxline_id: id.describe("Faxline ID returned by list_faxlines"),
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_id, faxline_id }) =>
+        backend.listFaxlineNumbers(user_id, faxline_id),
     }),
     define({
       name: "get_settings",
@@ -541,6 +585,267 @@ export function createToolDefinitions(
         callee,
         ...(caller_id === undefined ? {} : { callerId: caller_id }),
         ...(device_id === undefined ? {} : { deviceId: device_id }),
+      }),
+    }),
+    define({
+      name: "create_call_email_notification",
+      description: `${changeWarning} create an email notification for calls on an owned endpoint. Returns the complete before/after notification state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        endpoint_id: id.describe("Owned device or phoneline ID"),
+        cause: z.enum(["MISSED", "SUCCESSFUL"]),
+        direction: z.enum(["INCOMING", "OUTGOING"]),
+        email: swaggerString,
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, endpoint_id, cause, direction, email }) =>
+        backend.createCallEmailNotification({
+          userId: user_id,
+          endpointId: endpoint_id,
+          cause,
+          direction,
+          email,
+        }),
+    }),
+    define({
+      name: "create_call_sms_notification",
+      description: `${changeWarning} create an SMS notification for calls on an owned endpoint. Returns the complete before/after notification state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        endpoint_id: id.describe("Owned device or phoneline ID"),
+        cause: z.enum(["MISSED", "SUCCESSFUL"]),
+        direction: z.enum(["INCOMING", "OUTGOING"]),
+        number: e164,
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, endpoint_id, cause, direction, number }) =>
+        backend.createCallSmsNotification({
+          userId: user_id,
+          endpointId: endpoint_id,
+          cause,
+          direction,
+          number,
+        }),
+    }),
+    define({
+      name: "create_fax_email_notification",
+      description: `${changeWarning} create an email notification for incoming or outgoing faxes on an owned faxline. Returns before/after notification state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        faxline_id: id.describe("Faxline ID returned by list_faxlines"),
+        direction: z.enum(["INCOMING", "OUTGOING"]),
+        email: swaggerString,
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, faxline_id, direction, email }) =>
+        backend.createFaxEmailNotification({
+          userId: user_id,
+          faxlineId: faxline_id,
+          direction,
+          email,
+        }),
+    }),
+    define({
+      name: "create_fax_sms_notification",
+      description: `${changeWarning} create an SMS notification for incoming or outgoing faxes on an owned faxline. Returns before/after notification state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        faxline_id: id.describe("Faxline ID returned by list_faxlines"),
+        direction: z.enum(["INCOMING", "OUTGOING"]),
+        number: e164,
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, faxline_id, direction, number }) =>
+        backend.createFaxSmsNotification({
+          userId: user_id,
+          faxlineId: faxline_id,
+          direction,
+          number,
+        }),
+    }),
+    define({
+      name: "create_fax_report_notification",
+      description: `${changeWarning} create an email delivery-report notification for an owned faxline. Returns before/after notification state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        faxline_id: id.describe("Faxline ID returned by list_faxlines"),
+        email: swaggerString,
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, faxline_id, email }) =>
+        backend.createFaxReportNotification({
+          userId: user_id,
+          faxlineId: faxline_id,
+          email,
+        }),
+    }),
+    define({
+      name: "create_sms_email_notification",
+      description: `${changeWarning} create an email notification for incoming SMS on a user SMS endpoint. Returns before/after notification state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        endpoint_id: id.describe("SMS endpoint ID, for example y0"),
+        email: swaggerString,
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, endpoint_id, email }) =>
+        backend.createSmsEmailNotification({
+          userId: user_id,
+          endpointId: endpoint_id,
+          email,
+        }),
+    }),
+    define({
+      name: "create_voicemail_email_notification",
+      description: `${changeWarning} create an email notification for a user voicemail. Returns before/after notification state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        voicemail_id: id.describe("Voicemail ID, for example v0"),
+        email: swaggerString,
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, voicemail_id, email }) =>
+        backend.createVoicemailEmailNotification({
+          userId: user_id,
+          voicemailId: voicemail_id,
+          email,
+        }),
+    }),
+    define({
+      name: "create_voicemail_sms_notification",
+      description: `${changeWarning} create an SMS notification for a user voicemail. Returns before/after notification state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        voicemail_id: id.describe("Voicemail ID, for example v0"),
+        number: e164,
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, voicemail_id, number }) =>
+        backend.createVoicemailSmsNotification({
+          userId: user_id,
+          voicemailId: voicemail_id,
+          number,
+        }),
+    }),
+    define({
+      name: "delete_notification",
+      description: `${changeWarning} delete a notification after verifying that its nested notification ID belongs to the selected user. Returns before/after notification state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        notification_id: id.describe("Notification target ID returned by list_notifications"),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ user_id, notification_id }) =>
+        backend.deleteNotification(user_id, notification_id),
+    }),
+    define({
+      name: "hangup_call",
+      description: `${changeWarning} hang up an established call after verifying participant ownership. Returns the call before the hangup and its post-operation state.`,
+      schema: z.object({ call_id: id.describe("Call ID returned by list_calls") }),
+      annotations: writeAnnotations,
+      execute: async ({ call_id }) => backend.hangupCall(call_id),
+    }),
+    define({
+      name: "set_call_hold",
+      description: `${changeWarning} hold or resume all participants in an owned established call. Returns before/after call state.`,
+      schema: z.object({
+        call_id: id.describe("Call ID returned by list_calls"),
+        value: z.boolean().describe("true to hold; false to resume"),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ call_id, value }) => backend.setCallHold(call_id, value),
+    }),
+    define({
+      name: "set_call_muted",
+      description: `${changeWarning} mute or unmute yourself in an owned established call. sipgate does not support this for Neo PBX accounts. Returns before/after call state.`,
+      schema: z.object({
+        call_id: id.describe("Call ID returned by list_calls"),
+        value: z.boolean().describe("true to mute; false to unmute"),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ call_id, value }) => backend.setCallMuted(call_id, value),
+    }),
+    define({
+      name: "set_call_recording",
+      description: `${changeWarning} start or stop recording an owned call; recording may incur charges and is legally sensitive in Germany. The caller is responsible for obtaining every participant's consent. Returns before/after call state.`,
+      schema: z.object({
+        call_id: id.describe("Call ID returned by list_calls"),
+        value: z.boolean().describe("true to start; false to stop recording"),
+        announcement: z.boolean().optional()
+          .describe("Whether sipgate announces recording start/stop; defaults to sipgate's true setting"),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ call_id, value, announcement }) =>
+        backend.setCallRecording(call_id, value, announcement),
+    }),
+    define({
+      name: "transfer_call",
+      description: `${changeWarning} transfer an owned established call to another phone number. Returns before/after call state.`,
+      schema: z.object({
+        call_id: id.describe("Call ID returned by list_calls"),
+        attended: z.boolean().describe("true for attended; false for blind transfer"),
+        phone_number: e164.describe("Transfer target phone number"),
+        caller_id: e164.optional().describe("Optional owned caller ID for the transfer"),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ call_id, attended, phone_number, caller_id }) =>
+        backend.transferCall(call_id, {
+          attended,
+          phoneNumber: phone_number,
+          ...(caller_id === undefined ? {} : { callerId: caller_id }),
+        }),
+    }),
+    define({
+      name: "send_call_dtmf",
+      description: `${changeWarning} send a DTMF sequence to every participant in an owned established call. Returns before/after call state.`,
+      schema: z.object({
+        call_id: id.describe("Call ID returned by list_calls"),
+        sequence: swaggerString.describe("DTMF sequence, for example 123456"),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ call_id, sequence }) => backend.sendCallDtmf(call_id, sequence),
+    }),
+    define({
+      name: "start_call_announcement",
+      description: `${changeWarning} play a mono 16-bit PCM WAV announcement at 8 kHz to all participants in an owned call. sipgate does not support this for Neo PBX accounts. Returns before/after call state.`,
+      schema: z.object({
+        call_id: id.describe("Call ID returned by list_calls"),
+        url: swaggerString.describe("Public URL of the announcement WAV file"),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ call_id, url }) => backend.startCallAnnouncement(call_id, url),
+    }),
+    define({
+      name: "send_fax",
+      description: `${changeWarning} send a PDF fax from an owned faxline. SENDING A FAX INCURS CHARGES. The API has no synchronous fax-state read-back, so before is null and after includes the session response and an explicit note.`,
+      schema: z.object({
+        faxline_id: id.describe("Faxline ID returned by list_faxlines"),
+        recipient: e164,
+        filename: swaggerString.describe("Fax document filename, for example fax.pdf"),
+        base64_content: z.string().max(28_330_000)
+          .describe("Base64-encoded PDF content; sipgate's maximum is 28,330,000 characters"),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ faxline_id, recipient, filename, base64_content }) => backend.sendFax({
+        faxlineId: faxline_id,
+        recipient,
+        filename,
+        base64Content: base64_content,
+      }),
+    }),
+    define({
+      name: "resend_fax",
+      description: `${changeWarning} resend an existing fax. RESENDING A FAX INCURS CHARGES. User scope requires an owned faxline ID so ownership can be established; before is null because sipgate exposes no fax-session read-back here.`,
+      schema: z.object({
+        fax_id: id.describe("Fax ID to resend"),
+        faxline_id: (userScoped ? id : id.optional()).describe(userScoped
+          ? "Required owned faxline ID returned by list_faxlines"
+          : "Optional faxline ID; sipgate otherwise reuses the original faxline"),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ fax_id, faxline_id }) => backend.resendFax({
+        faxId: fax_id,
+        ...(faxline_id === undefined ? {} : { faxlineId: faxline_id }),
       }),
     }),
   ];

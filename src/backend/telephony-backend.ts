@@ -75,6 +75,81 @@ export interface AddressUpdateInput {
   street?: string;
 }
 
+export type NotificationDirection = "INCOMING" | "OUTGOING";
+export type CallNotificationCause = "MISSED" | "SUCCESSFUL";
+
+export interface CallEmailNotificationInput {
+  userId: string;
+  endpointId: string;
+  direction: NotificationDirection;
+  cause: CallNotificationCause;
+  email: string;
+}
+
+export interface CallSmsNotificationInput {
+  userId: string;
+  endpointId: string;
+  direction: NotificationDirection;
+  cause: CallNotificationCause;
+  number: string;
+}
+
+export interface FaxEmailNotificationInput {
+  userId: string;
+  faxlineId: string;
+  direction: NotificationDirection;
+  email: string;
+}
+
+export interface FaxSmsNotificationInput {
+  userId: string;
+  faxlineId: string;
+  direction: NotificationDirection;
+  number: string;
+}
+
+export interface FaxReportNotificationInput {
+  userId: string;
+  faxlineId: string;
+  email: string;
+}
+
+export interface SmsEmailNotificationInput {
+  userId: string;
+  endpointId: string;
+  email: string;
+}
+
+export interface VoicemailEmailNotificationInput {
+  userId: string;
+  voicemailId: string;
+  email: string;
+}
+
+export interface VoicemailSmsNotificationInput {
+  userId: string;
+  voicemailId: string;
+  number: string;
+}
+
+export interface CallTransferInput {
+  attended: boolean;
+  phoneNumber: string;
+  callerId?: string;
+}
+
+export interface SendFaxInput {
+  faxlineId: string;
+  recipient: string;
+  filename: string;
+  base64Content: string;
+}
+
+export interface ResendFaxInput {
+  faxId: string;
+  faxlineId?: string;
+}
+
 export interface TelephonyBackend {
   getAuthenticatedUser(): Promise<AuthenticatedUserContext>;
   getUser(userId: string): Promise<JsonValue>;
@@ -97,6 +172,10 @@ export interface TelephonyBackend {
   validateQuickDialNumber(quickDialNumber: string): Promise<JsonValue>;
   getRouting(userId?: string): Promise<JsonValue>;
   getCallHistory(query: HistoryQuery): Promise<JsonValue>;
+  listCalls(): Promise<JsonValue>;
+  listNotifications(userId: string): Promise<JsonValue>;
+  listFaxlines(userId: string): Promise<JsonValue>;
+  listFaxlineNumbers(userId: string, faxlineId: string): Promise<JsonValue>;
   getSettings(userId?: string): Promise<JsonValue>;
   setNumberRouting(numberId: string, endpointId: string): Promise<MutationResult>;
   setUserNumberRouting(
@@ -149,4 +228,28 @@ export interface TelephonyBackend {
     callerId?: string;
     deviceId?: string;
   }): Promise<MutationResult>;
+  createCallEmailNotification(input: CallEmailNotificationInput): Promise<MutationResult>;
+  createCallSmsNotification(input: CallSmsNotificationInput): Promise<MutationResult>;
+  createFaxEmailNotification(input: FaxEmailNotificationInput): Promise<MutationResult>;
+  createFaxSmsNotification(input: FaxSmsNotificationInput): Promise<MutationResult>;
+  createFaxReportNotification(input: FaxReportNotificationInput): Promise<MutationResult>;
+  createSmsEmailNotification(input: SmsEmailNotificationInput): Promise<MutationResult>;
+  createVoicemailEmailNotification(
+    input: VoicemailEmailNotificationInput,
+  ): Promise<MutationResult>;
+  createVoicemailSmsNotification(input: VoicemailSmsNotificationInput): Promise<MutationResult>;
+  deleteNotification(userId: string, notificationId: string): Promise<MutationResult>;
+  hangupCall(callId: string): Promise<MutationResult>;
+  setCallHold(callId: string, value: boolean): Promise<MutationResult>;
+  setCallMuted(callId: string, value: boolean): Promise<MutationResult>;
+  setCallRecording(
+    callId: string,
+    value: boolean,
+    announcement?: boolean,
+  ): Promise<MutationResult>;
+  transferCall(callId: string, input: CallTransferInput): Promise<MutationResult>;
+  sendCallDtmf(callId: string, sequence: string): Promise<MutationResult>;
+  startCallAnnouncement(callId: string, url: string): Promise<MutationResult>;
+  sendFax(input: SendFaxInput): Promise<MutationResult>;
+  resendFax(input: ResendFaxInput): Promise<MutationResult>;
 }
