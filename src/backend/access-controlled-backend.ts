@@ -1,13 +1,17 @@
 import type {
+  AddressUpdateInput,
   AccessScope,
   AuthenticatedUserContext,
+  DeviceSettingsInput,
   DeviceType,
   ForwardingRule,
   HistoryQuery,
   JsonObject,
   JsonValue,
+  LocalPrefixInput,
   MutationResult,
   PaginationInput,
+  QuickDialInput,
   TelephonyBackend,
 } from "./telephony-backend.js";
 
@@ -21,6 +25,7 @@ export class AccessPolicyError extends Error {
 interface OwnedNumbers {
   numberIds: Set<string>;
   phoneNumbers: Set<string>;
+  addressIds: Set<string>;
 }
 
 function asObject(value: JsonValue | undefined): JsonObject | undefined {
@@ -36,6 +41,20 @@ function objectArray(value: JsonValue | undefined): JsonObject[] {
 function stringField(value: JsonObject, key: string): string | undefined {
   const field = value[key];
   return typeof field === "string" ? field : undefined;
+}
+
+function stringOrNumberField(value: JsonObject, key: string): string | undefined {
+  const field = value[key];
+  return typeof field === "string" || typeof field === "number" ? String(field) : undefined;
+}
+
+function addressIds(value: JsonObject): string[] {
+  const direct = ["addressId", "emergencyAddressId"]
+    .map((key) => stringOrNumberField(value, key))
+    .filter((id): id is string => Boolean(id));
+  const addressUrl = stringField(value, "addressUrl");
+  const fromUrl = addressUrl?.match(/\/addresses\/(\d+)(?:\/|$)/)?.[1];
+  return fromUrl ? [...direct, fromUrl] : direct;
 }
 
 function items(value: JsonValue): JsonObject[] {
@@ -96,6 +115,11 @@ export class AccessControlledBackend implements TelephonyBackend {
     return this.delegate.listUserNumbers(userId, pagination);
   }
 
+  public getUserNumbers(userId: string): Promise<JsonValue> {
+    this.assertUser(userId);
+    return this.delegate.getUserNumbers(userId);
+  }
+
   public listPhonelines(userId: string): Promise<JsonValue> {
     this.assertUser(userId);
     return this.delegate.listPhonelines(userId);
@@ -105,6 +129,76 @@ export class AccessControlledBackend implements TelephonyBackend {
     if (this.scope === "account") return this.delegate.listDevices(userId, types);
     this.assertUser(userId);
     return this.delegate.listDevices(this.context.userId, types);
+  }
+
+  public async getDevice(deviceId: string): Promise<JsonValue> {
+    if (this.scope === "user") await this.assertOwnedDevice(deviceId);
+    return this.delegate.getDevice(deviceId);
+  }
+
+  public async getDeviceCallerId(deviceId: string): Promise<JsonValue> {
+    if (this.scope === "user") await this.assertOwnedDevice(deviceId);
+    return this.delegate.getDeviceCallerId(deviceId);
+  }
+
+  public async getDeviceLocalPrefix(deviceId: string): Promise<JsonValue> {
+    if (this.scope === "user") await this.assertOwnedDevice(deviceId);
+    return this.delegate.getDeviceLocalPrefix(deviceId);
+  }
+
+  public async getDeviceTariffAnnouncement(deviceId: string): Promise<JsonValue> {
+    if (this.scope === "user") await this.assertOwnedDevice(deviceId);
+    return this.delegate.getDeviceTariffAnnouncement(deviceId);
+  }
+
+  public async getDeviceSingleRowDisplay(deviceId: string): Promise<JsonValue> {
+    if (this.scope === "user") await this.assertOwnedDevice(deviceId);
+    return this.delegate.getDeviceSingleRowDisplay(deviceId);
+  }
+
+  public async getDeviceContingents(userId: string, deviceId: string): Promise<JsonValue> {
+    if (this.scope === "user") {
+      this.assertUser(userId);
+      await this.assertOwnedDevice(deviceId);
+    }
+    return this.delegate.getDeviceContingents(userId, deviceId);
+  }
+
+  public async listAddresses(): Promise<JsonValue> {
+    const response = await this.delegate.listAddresses();
+    if (this.scope === "account") return response;
+    const candidates = items(response);
+    try {
+      const candidateIds = candidates
+        .map((address) => stringOrNumberField(address, "addressId"))
+        .filter((value): value is string => Boolean(value && /^\d+$/.test(value)))
+        .map(Number);
+      const ownedIds = await this.ownedAddressIdsFor(candidateIds);
+      return {
+        items: candidates.filter((address) => {
+          const value = stringOrNumberField(address, "addressId");
+          return value !== undefined && ownedIds.has(value);
+        }),
+      };
+    } catch {
+      throw new AccessPolicyError(
+        "User scope could not establish ownership of the account's addresses.",
+      );
+    }
+  }
+
+  public async getAddress(addressId: number): Promise<JsonValue> {
+    if (this.scope === "user") await this.assertOwnedAddress(addressId);
+    return this.delegate.getAddress(addressId);
+  }
+
+  public async listAddressNumbers(addressId: number): Promise<JsonValue> {
+    if (this.scope === "user") await this.assertOwnedAddress(addressId);
+    return this.delegate.listAddressNumbers(addressId);
+  }
+
+  public validateQuickDialNumber(quickDialNumber: string): Promise<JsonValue> {
+    return this.delegate.validateQuickDialNumber(quickDialNumber);
   }
 
   public getRouting(userId?: string): Promise<JsonValue> {
@@ -145,14 +239,21 @@ export class AccessControlledBackend implements TelephonyBackend {
 
   public async setNumberRouting(numberId: string, endpointId: string): Promise<MutationResult> {
     if (this.scope === "user") {
-      // Accounts without a phoneline layer route numbers straight to a device,
-      // so an owned device is a legitimate destination endpoint.
-      const [numbers, endpointIds] = await Promise.all([
-        this.ownedNumbers(),
-        this.ownedConnectionIds(),
-      ]);
-      this.assertOwned(numbers.numberIds, numberId, "phone number");
-      this.assertOwned(endpointIds, endpointId, "destination endpoint");
+      try {
+        // Accounts without a phoneline layer route numbers straight to a
+        // device, so an owned device is a legitimate destination endpoint.
+        const [numbers, endpointIds] = await Promise.all([
+          this.ownedNumbers(),
+          this.ownedConnectionIds(),
+        ]);
+        this.assertOwned(numbers.numberIds, numberId, "phone number");
+        this.assertOwned(endpointIds, endpointId, "destination endpoint");
+      } catch (error) {
+        if (error instanceof AccessPolicyError) throw error;
+        throw new AccessPolicyError(
+          "User scope could not establish ownership of the requested number or destination endpoint.",
+        );
+      }
     }
     return this.scope === "user"
       ? this.delegate.setUserNumberRouting(this.context.userId, numberId, endpointId)
@@ -175,16 +276,149 @@ export class AccessControlledBackend implements TelephonyBackend {
   ): Promise<MutationResult> {
     if (this.scope === "user") {
       this.assertUser(userId);
-      this.assertOwned(await this.ownedPhonelineIds(), phonelineId, "phoneline");
+      try {
+        this.assertOwned(await this.ownedPhonelineIds(), phonelineId, "phoneline");
+      } catch (error) {
+        if (error instanceof AccessPolicyError) throw error;
+        throw new AccessPolicyError(
+          "User scope could not establish ownership of the requested phoneline.",
+        );
+      }
     }
     return this.delegate.setForwarding(userId, phonelineId, forwardings);
   }
 
   public async setDnd(deviceId: string, enabled: boolean): Promise<MutationResult> {
-    if (this.scope === "user") {
-      this.assertOwned(await this.ownedDeviceIds(), deviceId, "device");
-    }
+    if (this.scope === "user") await this.assertOwnedDevice(deviceId);
     return this.delegate.setDnd(deviceId, enabled);
+  }
+
+  public async updateDevice(
+    deviceId: string,
+    settings: DeviceSettingsInput,
+  ): Promise<MutationResult> {
+    if (this.scope === "user") {
+      await this.assertOwnedDevice(deviceId);
+      if (settings.emergencyAddressId !== undefined) {
+        await this.assertOwnedAddress(settings.emergencyAddressId);
+      }
+    }
+    return this.delegate.updateDevice(deviceId, settings);
+  }
+
+  public async deleteDevice(deviceId: string): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedDevice(deviceId);
+    return this.delegate.deleteDevice(deviceId);
+  }
+
+  public async setDeviceAlias(deviceId: string, value?: string): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedDevice(deviceId);
+    return this.delegate.setDeviceAlias(deviceId, value);
+  }
+
+  public async setDeviceCallerId(deviceId: string, value?: string): Promise<MutationResult> {
+    if (this.scope === "user") {
+      await this.assertOwnedDevice(deviceId);
+      if (value !== undefined) {
+        await this.assertOwnedPhoneNumber(value, "caller ID phone number");
+      }
+    }
+    return this.delegate.setDeviceCallerId(deviceId, value);
+  }
+
+  public async setDeviceLocalPrefix(
+    deviceId: string,
+    input: LocalPrefixInput,
+  ): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedDevice(deviceId);
+    return this.delegate.setDeviceLocalPrefix(deviceId, input);
+  }
+
+  public async setDeviceTariffAnnouncement(
+    deviceId: string,
+    enabled?: boolean,
+  ): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedDevice(deviceId);
+    return this.delegate.setDeviceTariffAnnouncement(deviceId, enabled);
+  }
+
+  public async setDeviceSingleRowDisplay(
+    deviceId: string,
+    enabled?: boolean,
+  ): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedDevice(deviceId);
+    return this.delegate.setDeviceSingleRowDisplay(deviceId, enabled);
+  }
+
+  public async setExternalDeviceTargetNumber(
+    deviceId: string,
+    number?: string,
+  ): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedDevice(deviceId);
+    return this.delegate.setExternalDeviceTargetNumber(deviceId, number);
+  }
+
+  public async setExternalDeviceIncomingCallDisplay(
+    deviceId: string,
+    incomingCallDisplay: "CALLED_NUMBER" | "CALLER_NUMBER",
+  ): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedDevice(deviceId);
+    return this.delegate.setExternalDeviceIncomingCallDisplay(deviceId, incomingCallDisplay);
+  }
+
+  public async changeDevicePassword(deviceId: string): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedDevice(deviceId);
+    return this.delegate.changeDevicePassword(deviceId);
+  }
+
+  public createRegisterDevice(userId: string, alias?: string): Promise<MutationResult> {
+    this.assertUser(userId);
+    return this.delegate.createRegisterDevice(userId, alias);
+  }
+
+  public createMobileDevice(userId: string, alias?: string): Promise<MutationResult> {
+    this.assertUser(userId);
+    return this.delegate.createMobileDevice(userId, alias);
+  }
+
+  public createExternalDevice(
+    userId: string,
+    alias?: string,
+    number?: string,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    return this.delegate.createExternalDevice(userId, alias, number);
+  }
+
+  public createQuickDial(input: QuickDialInput): Promise<MutationResult> {
+    this.assertUser(input.userId);
+    return this.delegate.createQuickDial(input);
+  }
+
+  public async updateQuickDial(
+    quickDialId: string,
+    input: QuickDialInput,
+  ): Promise<MutationResult> {
+    if (this.scope === "user") {
+      this.assertUser(input.userId);
+      await this.assertOwnedNumberId(quickDialId, "quick-dial number");
+    }
+    return this.delegate.updateQuickDial(quickDialId, input);
+  }
+
+  public async deleteQuickDial(numberId: string): Promise<MutationResult> {
+    if (this.scope === "user") {
+      await this.assertOwnedNumberId(numberId, "quick-dial number");
+    }
+    return this.delegate.deleteQuickDial(numberId);
+  }
+
+  public async updateAddress(
+    addressId: number,
+    input: AddressUpdateInput,
+  ): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedAddress(addressId);
+    return this.delegate.updateAddress(addressId, input);
   }
 
   public async sendSms(input: {
@@ -205,19 +439,26 @@ export class AccessControlledBackend implements TelephonyBackend {
     deviceId?: string;
   }): Promise<MutationResult> {
     if (this.scope === "user") {
-      const [numbers, deviceIds] = await Promise.all([
-        this.ownedNumbers(),
-        this.ownedDeviceIds(),
-      ]);
-      const callerIsOwned = deviceIds.has(input.caller)
-        || numbers.phoneNumbers.has(input.caller);
-      if (!callerIsOwned) {
+      try {
+        const [numbers, deviceIds] = await Promise.all([
+          this.ownedNumbers(),
+          this.ownedDeviceIds(),
+        ]);
+        const callerIsOwned = deviceIds.has(input.caller)
+          || numbers.phoneNumbers.has(input.caller);
+        if (!callerIsOwned) {
+          throw new AccessPolicyError(
+            "User scope only permits calls from the authenticated user's devices or phone numbers.",
+          );
+        }
+        if (input.deviceId) this.assertOwned(deviceIds, input.deviceId, "device");
+        if (input.callerId) this.assertOwned(numbers.phoneNumbers, input.callerId, "caller ID");
+      } catch (error) {
+        if (error instanceof AccessPolicyError) throw error;
         throw new AccessPolicyError(
-          "User scope only permits calls from the authenticated user's devices or phone numbers.",
+          "User scope could not establish ownership of the requested call origin.",
         );
       }
-      if (input.deviceId) this.assertOwned(deviceIds, input.deviceId, "device");
-      if (input.callerId) this.assertOwned(numbers.phoneNumbers, input.callerId, "caller ID");
     }
     return this.scope === "user"
       ? this.delegate.initiateUserCall(input)
@@ -274,6 +515,100 @@ export class AccessControlledBackend implements TelephonyBackend {
     );
   }
 
+  private async assertOwnedDevice(deviceId: string): Promise<void> {
+    try {
+      this.assertOwned(await this.ownedDeviceIds(), deviceId, "device");
+    } catch (error) {
+      if (error instanceof AccessPolicyError) throw error;
+      throw new AccessPolicyError(
+        "User scope could not establish ownership of the requested device.",
+      );
+    }
+  }
+
+  private async assertOwnedNumberId(numberId: string, resource: string): Promise<void> {
+    try {
+      this.assertOwned((await this.ownedNumbers()).numberIds, numberId, resource);
+    } catch (error) {
+      if (error instanceof AccessPolicyError) throw error;
+      throw new AccessPolicyError(
+        `User scope could not establish ownership of the requested ${resource}.`,
+      );
+    }
+  }
+
+  private async assertOwnedPhoneNumber(phoneNumber: string, resource: string): Promise<void> {
+    try {
+      this.assertOwned((await this.ownedNumbers()).phoneNumbers, phoneNumber, resource);
+    } catch (error) {
+      if (error instanceof AccessPolicyError) throw error;
+      throw new AccessPolicyError(
+        `User scope could not establish ownership of the requested ${resource}.`,
+      );
+    }
+  }
+
+  private async assertOwnedAddress(addressId: number): Promise<void> {
+    try {
+      if (await this.isOwnedAddress(addressId)) return;
+    } catch {
+      // Ownership lookup failures are deliberately exposed as policy denials.
+    }
+    throw new AccessPolicyError(
+      "User scope does not permit access to the requested address because ownership could not be established.",
+    );
+  }
+
+  private async isOwnedAddress(addressId: number): Promise<boolean> {
+    return (await this.ownedAddressIdsFor([addressId])).has(String(addressId));
+  }
+
+  private async ownedAddressIdsFor(addressIdsToCheck: number[]): Promise<Set<string>> {
+    if (addressIdsToCheck.length === 0) return new Set();
+    const expected = new Set(addressIdsToCheck.map(String));
+    const [numbers, devicesResponse] = await Promise.all([
+      this.ownedNumbers(),
+      this.delegate.listDevices(this.context.userId),
+    ]);
+    const owned = new Set([...numbers.addressIds].filter((addressId) => expected.has(addressId)));
+
+    const devices = items(devicesResponse);
+    for (const device of devices) {
+      for (const addressId of addressIds(device)) {
+        if (expected.has(addressId)) owned.add(addressId);
+      }
+    }
+
+    const detailedDevices = await Promise.allSettled(devices.map(async (device) => {
+      const deviceId = stringField(device, "id");
+      return deviceId ? this.delegate.getDevice(deviceId) : undefined;
+    }));
+    for (const result of detailedDevices) {
+      if (result.status !== "fulfilled") continue;
+      const device = asObject(result.value);
+      if (!device) continue;
+      for (const addressId of addressIds(device)) {
+        if (expected.has(addressId)) owned.add(addressId);
+      }
+    }
+
+    const unresolved = addressIdsToCheck.filter((addressId) => !owned.has(String(addressId)));
+    const addressNumberResponses = await Promise.all(unresolved.map(async (addressId) => ({
+      addressId: String(addressId),
+      response: await this.delegate.listAddressNumbers(addressId),
+    })));
+    for (const { addressId, response } of addressNumberResponses) {
+      const containsOwnedNumber = items(response).some((number) => {
+        const numberId = stringField(number, "id");
+        const phoneNumber = stringField(number, "number");
+        return (numberId !== undefined && numbers.numberIds.has(numberId))
+          || (phoneNumber !== undefined && numbers.phoneNumbers.has(phoneNumber));
+      });
+      if (containsOwnedNumber) owned.add(addressId);
+    }
+    return owned;
+  }
+
   private async ownedNumbers(): Promise<OwnedNumbers> {
     const numbersResponse = await this.delegate.listUserNumbers(
       this.context.userId,
@@ -286,6 +621,9 @@ export class AccessControlledBackend implements TelephonyBackend {
       ),
       phoneNumbers: new Set(
         numbers.map((number) => stringField(number, "number")).filter((number): number is string => Boolean(number)),
+      ),
+      addressIds: new Set(
+        numbers.flatMap((number) => addressIds(number)),
       ),
     };
   }

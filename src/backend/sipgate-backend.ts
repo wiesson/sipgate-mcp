@@ -1,13 +1,17 @@
 import { SipgateApiError, SipgateClient } from "./sipgate-client.js";
 import type {
+  AddressUpdateInput,
   AuthenticatedUserContext,
+  DeviceSettingsInput,
   DeviceType,
   ForwardingRule,
   HistoryQuery,
   JsonObject,
   JsonValue,
+  LocalPrefixInput,
   MutationResult,
   PaginationInput,
+  QuickDialInput,
   TelephonyBackend,
 } from "./telephony-backend.js";
 
@@ -215,6 +219,11 @@ export class SipgateBackend implements TelephonyBackend {
     });
   }
 
+  public async getUserNumbers(userId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(`/${encodeId(userId)}/numbers`);
+    return sanitize(response ?? { items: [] });
+  }
+
   public async listDevices(userId?: string, types?: DeviceType[]): Promise<JsonValue> {
     const userIds = userId ? [userId] : asItems(await this.client.request<JsonValue>("/users"))
       .map((user) => stringField(user, "id"))
@@ -231,6 +240,68 @@ export class SipgateBackend implements TelephonyBackend {
       asItems(response).map((device) => ({ ...device, userId: ownerId })),
     );
     return sanitize({ items });
+  }
+
+  public async getDevice(deviceId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(`/devices/${encodeId(deviceId)}`);
+    return sanitize(response ?? {});
+  }
+
+  public async getDeviceCallerId(deviceId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(
+      `/devices/${encodeId(deviceId)}/callerid`,
+    );
+    return sanitize(response ?? {});
+  }
+
+  public async getDeviceLocalPrefix(deviceId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(
+      `/devices/${encodeId(deviceId)}/localprefix`,
+    );
+    return sanitize(response ?? {});
+  }
+
+  public async getDeviceTariffAnnouncement(deviceId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(
+      `/devices/${encodeId(deviceId)}/tariffannouncement`,
+    );
+    return sanitize(response ?? {});
+  }
+
+  public async getDeviceSingleRowDisplay(deviceId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(
+      `/devices/${encodeId(deviceId)}/singlerowdisplay`,
+    );
+    return sanitize(response ?? {});
+  }
+
+  public async getDeviceContingents(userId: string, deviceId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(
+      `/${encodeId(userId)}/devices/${encodeId(deviceId)}/contingents`,
+    );
+    return sanitize(response ?? { contingents: [] });
+  }
+
+  public async listAddresses(): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/addresses");
+    return sanitize(response ?? { items: [] });
+  }
+
+  public async getAddress(addressId: number): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(`/addresses/${addressId}`);
+    return sanitize(response ?? {});
+  }
+
+  public async listAddressNumbers(addressId: number): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(`/addresses/${addressId}/numbers`);
+    return sanitize(response ?? { items: [] });
+  }
+
+  public async validateQuickDialNumber(quickDialNumber: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(
+      `/numbers/quickdial/validation/${encodeId(quickDialNumber)}`,
+    );
+    return sanitize(response ?? {});
   }
 
   public async getRouting(userId?: string): Promise<JsonValue> {
@@ -385,6 +456,229 @@ export class SipgateBackend implements TelephonyBackend {
     return { before: sanitize(before ?? {}), after: sanitize(after ?? {}) };
   }
 
+  public async updateDevice(
+    deviceId: string,
+    settings: DeviceSettingsInput,
+  ): Promise<MutationResult> {
+    const path = `/devices/${encodeId(deviceId)}`;
+    return this.mutateWithReadback(
+      () => this.client.request<JsonValue>(path),
+      path,
+      {
+        ...(settings.dnd === undefined ? {} : { dnd: settings.dnd }),
+        ...(settings.emergencyAddressId === undefined
+          ? {}
+          : { emergencyAddressId: settings.emergencyAddressId }),
+      },
+    );
+  }
+
+  public async deleteDevice(deviceId: string): Promise<MutationResult> {
+    const path = `/devices/${encodeId(deviceId)}`;
+    const before = await this.client.request<JsonValue>(path);
+    const response = await this.client.request<JsonValue>(path, { method: "DELETE" });
+    return {
+      before: sanitize(before ?? {}),
+      after: sanitize({
+        deleted: true,
+        response: response ?? null,
+        note: "sipgate does not provide a deleted-device read-back endpoint.",
+      }),
+    };
+  }
+
+  public setDeviceAlias(deviceId: string, value?: string): Promise<MutationResult> {
+    return this.mutateDeviceWithReadback(deviceId, `/devices/${encodeId(deviceId)}/alias`, {
+      ...(value === undefined ? {} : { value }),
+    });
+  }
+
+  public async setDeviceCallerId(deviceId: string, value?: string): Promise<MutationResult> {
+    const path = `/devices/${encodeId(deviceId)}/callerid`;
+    return this.mutateWithReadback(
+      () => this.client.request<JsonValue>(path),
+      path,
+      { ...(value === undefined ? {} : { value }) },
+    );
+  }
+
+  public async setDeviceLocalPrefix(
+    deviceId: string,
+    input: LocalPrefixInput,
+  ): Promise<MutationResult> {
+    const path = `/devices/${encodeId(deviceId)}/localprefix`;
+    return this.mutateWithReadback(
+      () => this.client.request<JsonValue>(path),
+      path,
+      {
+        ...(input.active === undefined ? {} : { active: input.active }),
+        ...(input.value === undefined ? {} : { value: input.value }),
+      },
+    );
+  }
+
+  public async setDeviceTariffAnnouncement(
+    deviceId: string,
+    enabled?: boolean,
+  ): Promise<MutationResult> {
+    const path = `/devices/${encodeId(deviceId)}/tariffannouncement`;
+    return this.mutateWithReadback(
+      () => this.client.request<JsonValue>(path),
+      path,
+      { ...(enabled === undefined ? {} : { enabled }) },
+    );
+  }
+
+  public async setDeviceSingleRowDisplay(
+    deviceId: string,
+    enabled?: boolean,
+  ): Promise<MutationResult> {
+    const path = `/devices/${encodeId(deviceId)}/singlerowdisplay`;
+    return this.mutateWithReadback(
+      () => this.client.request<JsonValue>(path),
+      path,
+      { ...(enabled === undefined ? {} : { enabled }) },
+    );
+  }
+
+  public setExternalDeviceTargetNumber(
+    deviceId: string,
+    number?: string,
+  ): Promise<MutationResult> {
+    return this.mutateDeviceWithReadback(
+      deviceId,
+      `/devices/${encodeId(deviceId)}/external/targetnumber`,
+      { ...(number === undefined ? {} : { number }) },
+    );
+  }
+
+  public setExternalDeviceIncomingCallDisplay(
+    deviceId: string,
+    incomingCallDisplay: "CALLED_NUMBER" | "CALLER_NUMBER",
+  ): Promise<MutationResult> {
+    return this.mutateDeviceWithReadback(
+      deviceId,
+      `/devices/${encodeId(deviceId)}/external/incomingcalldisplay`,
+      { incomingCallDisplay },
+    );
+  }
+
+  public async changeDevicePassword(deviceId: string): Promise<MutationResult> {
+    const devicePath = `/devices/${encodeId(deviceId)}`;
+    const before = await this.client.request<JsonValue>(devicePath);
+    const response = sanitize(await this.client.request<JsonValue>(
+      `${devicePath}/credentials/password`,
+      { method: "POST" },
+    ) ?? {});
+    return {
+      before: sanitize(before ?? {}),
+      after: sanitize({
+        credentials: response,
+        passwordChanged: true,
+        note: "sipgate returns the new credential only once; credential values are intentionally redacted.",
+      }),
+    };
+  }
+
+  public createRegisterDevice(userId: string, alias?: string): Promise<MutationResult> {
+    return this.createDevice(
+      `/${encodeId(userId)}/devices/register`,
+      { ...(alias === undefined ? {} : { alias }) },
+    );
+  }
+
+  public createMobileDevice(userId: string, alias?: string): Promise<MutationResult> {
+    return this.createDevice(
+      `/${encodeId(userId)}/devices/mobile`,
+      { ...(alias === undefined ? {} : { alias }) },
+    );
+  }
+
+  public createExternalDevice(
+    userId: string,
+    alias?: string,
+    number?: string,
+  ): Promise<MutationResult> {
+    return this.createDevice(
+      `/${encodeId(userId)}/devices/external`,
+      {
+        ...(alias === undefined ? {} : { alias }),
+        ...(number === undefined ? {} : { number }),
+      },
+    );
+  }
+
+  public async createQuickDial(input: QuickDialInput): Promise<MutationResult> {
+    const response = await this.client.request<JsonValue>("/numbers/quickdial", {
+      method: "POST",
+      body: {
+        userId: input.userId,
+        ...(input.number === undefined ? {} : { number: input.number }),
+      },
+    });
+    return {
+      before: null,
+      after: sanitize({
+        response: response ?? null,
+        requestAccepted: true,
+        note: "sipgate does not document a quick-dial creation read-back response; use list_user_numbers to inspect the result.",
+      }),
+    };
+  }
+
+  public async updateQuickDial(
+    quickDialId: string,
+    input: QuickDialInput,
+  ): Promise<MutationResult> {
+    const before = await this.findNumber(quickDialId);
+    await this.client.request<JsonValue>(`/numbers/quickdial/${encodeId(quickDialId)}`, {
+      method: "PUT",
+      body: {
+        userId: input.userId,
+        ...(input.number === undefined ? {} : { number: input.number }),
+      },
+    });
+    const after = await this.findNumber(quickDialId);
+    return { before: sanitize(before), after: sanitize(after) };
+  }
+
+  public async deleteQuickDial(numberId: string): Promise<MutationResult> {
+    const before = await this.findNumber(numberId);
+    const response = await this.client.request<JsonValue>(
+      `/numbers/quickdial/${encodeId(numberId)}`,
+      { method: "DELETE" },
+    );
+    return {
+      before: sanitize(before),
+      after: sanitize({
+        deleted: true,
+        response: response ?? null,
+        note: "sipgate does not provide a deleted quick-dial read-back endpoint.",
+      }),
+    };
+  }
+
+  public async updateAddress(
+    addressId: number,
+    input: AddressUpdateInput,
+  ): Promise<MutationResult> {
+    const path = `/addresses/${addressId}`;
+    return this.mutateWithReadback(
+      () => this.client.request<JsonValue>(path),
+      path,
+      {
+        city: input.city,
+        countrycode: input.countrycode,
+        postcode: input.postcode,
+        ...(input.address1 === undefined ? {} : { address1: input.address1 }),
+        ...(input.address2 === undefined ? {} : { address2: input.address2 }),
+        ...(input.number === undefined ? {} : { number: input.number }),
+        ...(input.state === undefined ? {} : { state: input.state }),
+        ...(input.street === undefined ? {} : { street: input.street }),
+      },
+    );
+  }
+
   public async sendSms(input: {
     userId: string;
     smsId?: string;
@@ -512,5 +806,40 @@ export class SipgateBackend implements TelephonyBackend {
       },
     });
     return asItems(response)[0] ?? null;
+  }
+
+  private async mutateWithReadback(
+    read: () => Promise<JsonValue | undefined>,
+    path: string,
+    body: JsonObject,
+  ): Promise<MutationResult> {
+    const before = await read();
+    await this.client.request<JsonValue>(path, { method: "PUT", body });
+    const after = await read();
+    return { before: sanitize(before ?? {}), after: sanitize(after ?? {}) };
+  }
+
+  private mutateDeviceWithReadback(
+    deviceId: string,
+    path: string,
+    body: JsonObject,
+  ): Promise<MutationResult> {
+    return this.mutateWithReadback(
+      () => this.client.request<JsonValue>(`/devices/${encodeId(deviceId)}`),
+      path,
+      body,
+    );
+  }
+
+  private async createDevice(path: string, body: JsonObject): Promise<MutationResult> {
+    const response = await this.client.request<JsonValue>(path, { method: "POST", body });
+    return {
+      before: null,
+      after: sanitize({
+        device: response ?? {},
+        created: true,
+        note: "No device existed before this create operation; the returned device is the initial state.",
+      }),
+    };
   }
 }

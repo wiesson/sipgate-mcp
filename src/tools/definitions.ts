@@ -38,6 +38,8 @@ const actionAnnotations: ToolAnnotations = {
 };
 
 const id = z.string().trim().min(1).max(128);
+const int32Id = z.int().min(-2_147_483_648).max(2_147_483_647);
+const swaggerString = z.string();
 const e164 = z.string().regex(/^\+[1-9]\d{6,14}$/, "Use an E.164 phone number such as +4915799912345");
 const isoDateTime = z.string().refine((value) => !Number.isNaN(Date.parse(value)), "Use an ISO 8601 date-time");
 
@@ -63,6 +65,9 @@ export function createToolDefinitions(
   accessScope: AccessScope = "user",
 ): ToolDefinition[] {
   const userScoped = accessScope === "user";
+  const changeWarning = userScoped
+    ? "CHANGES THE AUTHENTICATED USER'S SIPGATE ACCOUNT AND MAY INCUR CHARGES:"
+    : "CHANGES THE SIPGATE ACCOUNT AND MAY INCUR CHARGES:";
   const readTools = [
     define({
       name: "account_info",
@@ -108,6 +113,94 @@ export function createToolDefinitions(
       }),
       annotations: readAnnotations,
       execute: async ({ user_id, types }) => backend.listDevices(user_id, types),
+    }),
+    define({
+      name: "get_device",
+      description: "Get one sipgate device and its current settings after verifying user-scope ownership.",
+      schema: z.object({ device_id: id.describe("Device ID returned by list_devices") }),
+      annotations: readAnnotations,
+      execute: async ({ device_id }) => backend.getDevice(device_id),
+    }),
+    define({
+      name: "get_device_caller_id",
+      description: "Get the outgoing caller ID configured for one owned sipgate device.",
+      schema: z.object({ device_id: id.describe("Device ID returned by list_devices") }),
+      annotations: readAnnotations,
+      execute: async ({ device_id }) => backend.getDeviceCallerId(device_id),
+    }),
+    define({
+      name: "get_device_local_prefix",
+      description: "Get the automatic local-area-code prefix setting for one owned sipgate device.",
+      schema: z.object({ device_id: id.describe("Device ID returned by list_devices") }),
+      annotations: readAnnotations,
+      execute: async ({ device_id }) => backend.getDeviceLocalPrefix(device_id),
+    }),
+    define({
+      name: "get_device_tariff_announcement",
+      description: "Get the tariff-announcement setting for one owned sipgate device.",
+      schema: z.object({ device_id: id.describe("Device ID returned by list_devices") }),
+      annotations: readAnnotations,
+      execute: async ({ device_id }) => backend.getDeviceTariffAnnouncement(device_id),
+    }),
+    define({
+      name: "get_device_single_row_display",
+      description: "Get the single-row display setting for one owned sipgate device.",
+      schema: z.object({ device_id: id.describe("Device ID returned by list_devices") }),
+      annotations: readAnnotations,
+      execute: async ({ device_id }) => backend.getDeviceSingleRowDisplay(device_id),
+    }),
+    define({
+      name: "get_device_contingents",
+      description: "List the booked and remaining contingents for one owned sipgate device.",
+      schema: z.object({
+        user_id: id.describe(userScoped
+          ? "Authenticated sipgate user ID; another user's ID is rejected"
+          : "Owner user ID, for example w0"),
+        device_id: id.describe("Device ID returned by list_devices"),
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_id, device_id }) => backend.getDeviceContingents(user_id, device_id),
+    }),
+    define({
+      name: "list_user_numbers",
+      description: "List phone numbers from sipgate's documented user-specific numbers endpoint without using phonelines.",
+      schema: z.object({
+        user_id: id.describe(userScoped
+          ? "Authenticated sipgate user ID; another user's ID is rejected"
+          : "sipgate user ID, for example w0"),
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_id }) => backend.getUserNumbers(user_id),
+    }),
+    define({
+      name: "validate_quick_dial",
+      description: "Check whether a quick-dial number is already taken in the sipgate account.",
+      schema: z.object({ quick_dial_number: swaggerString.describe("Quick-dial number, for example 42") }),
+      annotations: readAnnotations,
+      execute: async ({ quick_dial_number }) => backend.validateQuickDialNumber(quick_dial_number),
+    }),
+    define({
+      name: "list_addresses",
+      description: userScoped
+        ? "List only emergency addresses associated with the authenticated user's devices or phone numbers."
+        : "List all sipgate account addresses.",
+      schema: z.object({}),
+      annotations: readAnnotations,
+      execute: async () => backend.listAddresses(),
+    }),
+    define({
+      name: "get_address",
+      description: "Get one emergency address after verifying user-scope ownership.",
+      schema: z.object({ address_id: int32Id.describe("Integer address ID returned by list_addresses") }),
+      annotations: readAnnotations,
+      execute: async ({ address_id }) => backend.getAddress(address_id),
+    }),
+    define({
+      name: "list_address_numbers",
+      description: "List phone numbers associated with one emergency address after verifying user-scope ownership.",
+      schema: z.object({ address_id: int32Id.describe("Integer address ID returned by list_addresses") }),
+      annotations: readAnnotations,
+      execute: async ({ address_id }) => backend.listAddressNumbers(address_id),
     }),
     define({
       name: "get_routing",
@@ -172,9 +265,7 @@ export function createToolDefinitions(
   const writeTools = [
     define({
       name: "set_number_routing",
-      description: userScoped
-        ? "CHANGES THE AUTHENTICATED USER'S SIPGATE SETTINGS: route one of that user's assigned phone numbers to one of that user's phonelines. Reads and returns before/after state."
-        : "CHANGES THE SIPGATE ACCOUNT: route a phone number to a sipgate endpoint ID (for example a phoneline). Reads and returns the number's before/after state.",
+      description: `${changeWarning} route a phone number to a sipgate endpoint ID. Reads and returns before/after state.`,
       schema: z.object({
         number_id: id.describe("Phone-number ID returned by list_numbers"),
         endpoint_id: id.describe("Destination endpoint ID accepted by sipgate, for example p0"),
@@ -184,9 +275,7 @@ export function createToolDefinitions(
     }),
     define({
       name: "set_forwarding",
-      description: userScoped
-        ? "CHANGES THE AUTHENTICATED USER'S SIPGATE SETTINGS: replace all forwardings for one of that user's phonelines, including timeout routing. Pass [] to delete all forwardings. Returns before/after state."
-        : "CHANGES THE SIPGATE ACCOUNT: replace all forwardings for a phoneline, including timeout routing. Pass an empty forwardings array to delete all forwardings. Reads and returns before/after state.",
+      description: `${changeWarning} replace all forwardings for a phoneline, including timeout routing. Pass [] to delete all forwardings. Returns before/after state.`,
       schema: z.object({
         user_id: id.describe(userScoped
           ? "Authenticated sipgate user ID; another user's ID is rejected"
@@ -204,9 +293,7 @@ export function createToolDefinitions(
     }),
     define({
       name: "set_dnd",
-      description: userScoped
-        ? "CHANGES THE AUTHENTICATED USER'S SIPGATE SETTINGS: enable or disable Do Not Disturb for one of that user's devices. Returns before/after state."
-        : "CHANGES THE SIPGATE ACCOUNT: enable or disable Do Not Disturb for one device. Reads and returns the device's before/after state.",
+      description: `${changeWarning} enable or disable Do Not Disturb for one device. Returns before/after state.`,
       schema: z.object({
         device_id: id.describe("Device ID returned by list_devices"),
         enabled: z.boolean(),
@@ -215,10 +302,212 @@ export function createToolDefinitions(
       execute: async ({ device_id, enabled }) => backend.setDnd(device_id, enabled),
     }),
     define({
+      name: "update_device",
+      description: `${changeWarning} update DND and/or the emergency address for an owned device. Returns before/after state.`,
+      schema: z.object({
+        device_id: id.describe("Device ID returned by list_devices"),
+        dnd: z.boolean().optional(),
+        emergency_address_id: int32Id.optional().describe("Address ID returned by list_addresses"),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ device_id, dnd, emergency_address_id }) => backend.updateDevice(device_id, {
+        ...(dnd === undefined ? {} : { dnd }),
+        ...(emergency_address_id === undefined ? {} : { emergencyAddressId: emergency_address_id }),
+      }),
+    }),
+    define({
+      name: "delete_device",
+      description: `${changeWarning} permanently delete an owned device. Returns the previous device and an explicit deletion marker.`,
+      schema: z.object({ device_id: id.describe("Device ID returned by list_devices") }),
+      annotations: writeAnnotations,
+      execute: async ({ device_id }) => backend.deleteDevice(device_id),
+    }),
+    define({
+      name: "set_device_alias",
+      description: `${changeWarning} update the alias of an owned device. Returns before/after device state.`,
+      schema: z.object({
+        device_id: id.describe("Device ID returned by list_devices"),
+        value: swaggerString.optional().describe("New device alias"),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ device_id, value }) => backend.setDeviceAlias(device_id, value),
+    }),
+    define({
+      name: "set_device_caller_id",
+      description: `${changeWarning} update the caller ID of an owned device to one of the authenticated user's owned numbers. Returns before/after state.`,
+      schema: z.object({
+        device_id: id.describe("Device ID returned by list_devices"),
+        value: swaggerString.optional().describe("Caller ID value accepted by sipgate"),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ device_id, value }) => backend.setDeviceCallerId(device_id, value),
+    }),
+    define({
+      name: "set_device_local_prefix",
+      description: `${changeWarning} update automatic local-area-code handling for an owned device. Returns before/after state.`,
+      schema: z.object({
+        device_id: id.describe("Device ID returned by list_devices"),
+        active: z.boolean().optional(),
+        value: swaggerString.optional().describe("Local prefix, for example 030"),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ device_id, active, value }) => backend.setDeviceLocalPrefix(device_id, {
+        ...(active === undefined ? {} : { active }),
+        ...(value === undefined ? {} : { value }),
+      }),
+    }),
+    define({
+      name: "set_device_tariff_announcement",
+      description: `${changeWarning} update the tariff-announcement setting for an owned device. Returns before/after state.`,
+      schema: z.object({
+        device_id: id.describe("Device ID returned by list_devices"),
+        enabled: z.boolean().optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ device_id, enabled }) => backend.setDeviceTariffAnnouncement(device_id, enabled),
+    }),
+    define({
+      name: "set_device_single_row_display",
+      description: `${changeWarning} update the single-row display setting for an owned device. Returns before/after state.`,
+      schema: z.object({
+        device_id: id.describe("Device ID returned by list_devices"),
+        enabled: z.boolean().optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ device_id, enabled }) => backend.setDeviceSingleRowDisplay(device_id, enabled),
+    }),
+    define({
+      name: "set_external_device_target_number",
+      description: `${changeWarning} update the target phone number of an owned external device. Returns before/after device state.`,
+      schema: z.object({
+        device_id: id.describe("External device ID returned by list_devices"),
+        number: swaggerString.optional().describe("External target phone number"),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ device_id, number }) => backend.setExternalDeviceTargetNumber(device_id, number),
+    }),
+    define({
+      name: "set_external_device_incoming_call_display",
+      description: `${changeWarning} choose whether an owned external device sees the called or caller number. Returns before/after device state.`,
+      schema: z.object({
+        device_id: id.describe("External device ID returned by list_devices"),
+        incoming_call_display: z.enum(["CALLED_NUMBER", "CALLER_NUMBER"]),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ device_id, incoming_call_display }) =>
+        backend.setExternalDeviceIncomingCallDisplay(device_id, incoming_call_display),
+    }),
+    define({
+      name: "change_device_password",
+      description: `${changeWarning} rotate an owned register device's SIP password. The returned credential is always redacted.`,
+      schema: z.object({ device_id: id.describe("Register device ID returned by list_devices") }),
+      annotations: actionAnnotations,
+      execute: async ({ device_id }) => backend.changeDevicePassword(device_id),
+    }),
+    define({
+      name: "create_register_device",
+      description: `${changeWarning} create a SIP register device; device creation may affect billing. Returns the sanitized initial device state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        alias: swaggerString.optional(),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, alias }) => backend.createRegisterDevice(user_id, alias),
+    }),
+    define({
+      name: "create_mobile_device",
+      description: `${changeWarning} create a mobile device; device or SIM provisioning may affect billing. Returns the sanitized initial device state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        alias: swaggerString.optional(),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, alias }) => backend.createMobileDevice(user_id, alias),
+    }),
+    define({
+      name: "create_external_device",
+      description: `${changeWarning} create an external device; device provisioning or calls may affect billing. Returns the sanitized initial device state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        alias: swaggerString.optional(),
+        number: swaggerString.optional().describe("External target phone number"),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, alias, number }) => backend.createExternalDevice(user_id, alias, number),
+    }),
+    define({
+      name: "create_quick_dial",
+      description: `${changeWarning} create a quick-dial number for a sipgate user. The API has no documented read-back response.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        number: swaggerString.optional().describe("Quick-dial number"),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, number }) => backend.createQuickDial({
+        userId: user_id,
+        ...(number === undefined ? {} : { number }),
+      }),
+    }),
+    define({
+      name: "update_quick_dial",
+      description: `${changeWarning} update an owned quick-dial number and its assigned user. Returns before/after state.`,
+      schema: z.object({
+        quick_dial_id: id.describe("Quick-dial ID returned by list_user_numbers or list_numbers"),
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        number: swaggerString.optional().describe("Quick-dial number"),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ quick_dial_id, user_id, number }) => backend.updateQuickDial(quick_dial_id, {
+        userId: user_id,
+        ...(number === undefined ? {} : { number }),
+      }),
+    }),
+    define({
+      name: "delete_quick_dial",
+      description: `${changeWarning} permanently delete an owned quick-dial number. Returns its previous state and a deletion marker.`,
+      schema: z.object({ number_id: id.describe("Quick-dial number ID") }),
+      annotations: writeAnnotations,
+      execute: async ({ number_id }) => backend.deleteQuickDial(number_id),
+    }),
+    define({
+      name: "update_address",
+      description: `${changeWarning} update an owned emergency address. Depending on the country, this may deactivate associated phone numbers. Returns before/after state.`,
+      schema: z.object({
+        address_id: int32Id.describe("Integer address ID returned by list_addresses"),
+        city: swaggerString,
+        countrycode: swaggerString,
+        postcode: swaggerString,
+        address1: swaggerString.optional(),
+        address2: swaggerString.optional(),
+        number: swaggerString.optional().describe("Street/house number, as named by sipgate's schema"),
+        state: swaggerString.optional(),
+        street: swaggerString.optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({
+        address_id,
+        city,
+        countrycode,
+        postcode,
+        address1,
+        address2,
+        number,
+        state,
+        street,
+      }) => backend.updateAddress(address_id, {
+        city,
+        countrycode,
+        postcode,
+        ...(address1 === undefined ? {} : { address1 }),
+        ...(address2 === undefined ? {} : { address2 }),
+        ...(number === undefined ? {} : { number }),
+        ...(state === undefined ? {} : { state }),
+        ...(street === undefined ? {} : { street }),
+      }),
+    }),
+    define({
       name: "send_sms",
-      description: userScoped
-        ? "MAY INCUR CHARGES: send an SMS from the authenticated user's verified SMS-capable extension. Returns the relevant before/after history snapshot; history can update asynchronously."
-        : "CHANGES THE SIPGATE ACCOUNT AND MAY INCUR CHARGES: send an SMS after verifying an SMS-capable extension. Reads and returns the relevant before/after history snapshot; history can update asynchronously.",
+      description: `${changeWarning} send an SMS after verifying an SMS-capable extension. Returns a before/after history snapshot; history can update asynchronously.`,
       schema: z.object({
         user_id: id.describe(userScoped
           ? "Authenticated sipgate user ID; another user's ID is rejected"
@@ -239,9 +528,7 @@ export function createToolDefinitions(
     }),
     define({
       name: "initiate_call",
-      description: userScoped
-        ? "MAY INCUR CHARGES: start a Click2Dial call from the authenticated user's verified device or phone number. Returns before/after call state and the new session."
-        : "CHANGES THE SIPGATE ACCOUNT AND MAY INCUR CHARGES: start a Click2Dial call. Reads established calls before and after and returns the new session; ringing calls may not appear immediately.",
+      description: `${changeWarning} start a Click2Dial call from a verified device or phone number. Returns before/after call state and the new session.`,
       schema: z.object({
         caller: id.describe("sipgate device ID or caller phone number"),
         callee: e164,

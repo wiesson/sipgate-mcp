@@ -107,7 +107,7 @@ addition to sipgate's own user role and PAT scopes:
 
 | Value | Behavior |
 | --- | --- |
-| `user` (default) | Resolves the authenticated user through `/authorization/userinfo`; returns only that user and their assigned numbers; forces user-specific device, routing, and settings reads; constrains call history to owned connection IDs; and validates every write target against owned numbers, phonelines, or devices. |
+| `user` (default) | Resolves the authenticated user through `/authorization/userinfo`; returns only that user and their assigned numbers; forces user-specific device, routing, and settings reads; constrains call history to owned connection IDs; and validates every write target against owned numbers, phonelines, devices, or emergency addresses associated with an owned device/number. |
 | `account` | Enables account-wide reads and writes. Startup fails unless `/users/{authenticatedUserId}` reports `admin: true`. Requires `users:read` for the administrator check. |
 
 Token scopes are permission ceilings, not role elevation. For example,
@@ -134,24 +134,56 @@ listed specific and parent scopes offered by the PAT UI when in doubt.
 | --- | --- | --- | --- |
 | `account_info` | Read | User: cached `/authorization/userinfo`; account: plus `GET /account` | Account: `account:read` (`userinfo` has no scope declaration in Swagger) |
 | `list_users` | Read | User: `GET /users/{self}`; account: `GET /users` | `users:read` |
-| `list_numbers` | Read | User: `GET /{self}/phonelines` and each phoneline's `/numbers`; account: `GET /numbers` | User: `phonelines:read`, `phonelines:numbers:read`; account: `numbers:read` |
+| `list_numbers` | Read | User: own phonelines, or owned devices plus paginated `GET /numbers` when phonelines are unavailable; account: `GET /numbers` | User: `phonelines:read`, `phonelines:numbers:read`; fallback: `devices:read`, `numbers:read`; account: `numbers:read` |
 | `list_devices` | Read | User: `GET /{self}/devices`; account: `GET /users`, `GET /{userId}/devices` | `devices:read`; account also needs `users:read` when `user_id` is omitted |
+| `get_device` | Read | Ownership `GET /{self}/devices`, then `GET /devices/{deviceId}` | `devices:read` |
+| `get_device_caller_id` | Read | Device ownership read, then `GET /devices/{deviceId}/callerid` | `devices:read`, `devices:callerid:read` |
+| `get_device_local_prefix` | Read | Device ownership read, then `GET /devices/{deviceId}/localprefix` | `devices:read`, `devices:localprefix:read` |
+| `get_device_tariff_announcement` | Read | Device ownership read, then `GET /devices/{deviceId}/tariffannouncement` | `devices:read`, `devices:tariffannouncement:read` |
+| `get_device_single_row_display` | Read | Device ownership read, then `GET /devices/{deviceId}/singlerowdisplay` | `devices:read`, `devices:singlerowdisplay:read` |
+| `get_device_contingents` | Read | Device/user ownership reads, then `GET /{userId}/devices/{deviceId}/contingents` | `devices:read` |
+| `list_user_numbers` | Read | `GET /{userId}/numbers`; this direct endpoint never uses phonelines | `numbers:read` |
+| `validate_quick_dial` | Read | `GET /numbers/quickdial/validation/{quickDialNumber}` | `numbers:read` |
+| `list_addresses` | Read | `GET /addresses`; user scope filters through owned device/number relationships | `addresses:read`; user ownership also needs `devices:read`, `numbers:read` and the applicable owned-number read scopes |
+| `get_address` | Read | Address ownership reads, then `GET /addresses/{addressId}` | `addresses:read`; user ownership also needs `devices:read`, `numbers:read` and the applicable owned-number read scopes |
+| `list_address_numbers` | Read | Address ownership reads, then `GET /addresses/{addressId}/numbers` | `numbers:read`, plus user ownership read scopes |
 | `get_routing` | Read | User: own phonelines, numbers, and forwardings; account: also `GET /numbers` and `GET /users` | `phonelines:read`, `phonelines:numbers:read`, `phonelines:forwardings:read`; account also needs `numbers:read` and, when `user_id` is omitted, `users:read` |
 | `call_history` | Read | User: ownership reads for own phonelines/devices, then filtered `GET /history`; account: `GET /history` | `history:read`; user also needs `phonelines:read`, `devices:read` |
 | `get_settings` | Read | `GET /users[/userId]`, `GET /{userId}/devices`, `GET /{userId}/phonelines[/phonelineId]` | `users:read`, `devices:read`, `phonelines:read` |
 | `set_number_routing` | Write | User: pre/post reads through own phonelines; account: pre/post `GET /numbers`; all modes: `PUT /numbers/{numberId}` | `numbers:write`; user also needs `phonelines:read`, `phonelines:numbers:read`; account needs `numbers:read` |
 | `set_forwarding` | Write | User: phoneline ownership read; then pre/post forwarding reads and `PUT` | `phonelines:read`, `phonelines:write`, `phonelines:forwardings:read`, `phonelines:forwardings:write` |
 | `set_dnd` | Write | User: device ownership read; then pre/post `GET /devices/{deviceId}` and `PUT` | `devices:read`, `devices:write` |
+| `update_device` | Write | Device and optional emergency-address ownership reads; pre/post `GET` plus `PUT /devices/{deviceId}` | `devices:read`, `devices:write`; address ownership may also need `numbers:read` and owned-number read scopes |
+| `delete_device` | Write | Device ownership and before-state reads, then `DELETE /devices/{deviceId}` | `devices:read`, `devices:write` |
+| `set_device_alias` | Write | Device ownership read; pre/post device reads and `PUT /devices/{deviceId}/alias` | `devices:read`, `devices:write` |
+| `set_device_caller_id` | Write | Device and caller-number ownership reads; pre/post caller-ID reads and `PUT /devices/{deviceId}/callerid` | `devices:read`, `devices:write`, `devices:callerid:read`, `devices:callerid:write`, plus owned-number read scopes |
+| `set_device_local_prefix` | Write | Device ownership read; pre/post setting reads and `PUT /devices/{deviceId}/localprefix` | `devices:read`, `devices:write`, `devices:localprefix:read`, `devices:localprefix:write` |
+| `set_device_tariff_announcement` | Write | Device ownership read; pre/post setting reads and `PUT /devices/{deviceId}/tariffannouncement` | `devices:read`, `devices:write`, `devices:tariffannouncement:read`, `devices:tariffannouncement:write` |
+| `set_device_single_row_display` | Write | Device ownership read; pre/post setting reads and `PUT /devices/{deviceId}/singlerowdisplay` | `devices:read`, `devices:write`, `devices:singlerowdisplay:read`, `devices:singlerowdisplay:write` |
+| `set_external_device_target_number` | Write | Device ownership read; pre/post device reads and `PUT /devices/{deviceId}/external/targetnumber` | `devices:read`, `devices:write` |
+| `set_external_device_incoming_call_display` | Write | Device ownership read; pre/post device reads and `PUT /devices/{deviceId}/external/incomingcalldisplay` | `devices:read`, `devices:write` |
+| `change_device_password` | Write/action | Device ownership/before-state reads, then `POST /devices/{deviceId}/credentials/password`; the response is redacted | `devices:read`, `devices:write` |
+| `create_register_device` | Write/action | `POST /{userId}/devices/register` | `devices:write` |
+| `create_mobile_device` | Write/action | `POST /{userId}/devices/mobile` | `devices:write` |
+| `create_external_device` | Write/action | `POST /{userId}/devices/external` | `devices:write` |
+| `create_quick_dial` | Write/action | `POST /numbers/quickdial` | `numbers:write` |
+| `update_quick_dial` | Write | Owned-number before/after reads and `PUT /numbers/quickdial/{quickdialId}` | `numbers:read`, `numbers:write`, plus applicable owned-number read scopes |
+| `delete_quick_dial` | Write | Owned-number before-state read and `DELETE /numbers/quickdial/{numberId}` | `numbers:read`, `numbers:write`, plus applicable owned-number read scopes |
+| `update_address` | Write | Address ownership and pre/post address reads, then `PUT /addresses/{addressId}` | `addresses:read`, `addresses:write`, plus user ownership read scopes |
 | `send_sms` | Write/action | `GET /{userId}/sms`, pre/post `GET /history`, `POST /sessions/sms` | `sms:read`, `history:read`, `sessions:write`, `sessions:sms:write` |
 | `initiate_call` | Write/action | User: device/number ownership reads, then `POST /sessions/calls`; account: pre/post `GET /calls` plus `POST` | `sessions:write`, `sessions:calls:write`; user also needs `devices:read`, `phonelines:read`, `phonelines:numbers:read`; account needs `rtcm:read` |
 
-Every write tool reads current state first and returns a JSON object with `before` and `after`. SMS history can update asynchronously, and `/calls` only contains established calls, so those action snapshots also include an acceptance/session marker.
+Every write tool returns a JSON object with `before` and `after`. Where a resource can be read, the tool reads current state first and reads it back after the change. Create operations use `before: null`; deletes and API operations without a documented read-back return an explicit note and acceptance/deletion marker. SMS history can update asynchronously, and `/calls` only contains established calls.
 
 ### Tool notes
 
 - `list_devices` resolves devices through users because the documented account-wide route is `GET /{userId}/devices`; the live v2 Swagger document does not define `GET /devices`.
-- User scope resolves assigned numbers through the authenticated user's phonelines and never calls account-wide `GET /users` or `GET /numbers` for read tools.
+- `list_user_numbers` calls the documented direct `GET /{userId}/numbers` endpoint and never uses phonelines. Ownership checks retain the device-based fallback required by accounts without a phoneline layer.
+- User scope never calls account-wide `GET /users`. It calls paginated account `GET /numbers` only for the device-based ownership fallback when phonelines are unavailable.
 - User-scoped number-routing snapshots are also resolved through owned phonelines, and user-scoped Click2Dial deliberately omits account-wide `/calls` snapshots.
+- Address IDs are exposed as integers because sipgate declares every address path parameter as `int32`. In user scope an address is visible or mutable only when an owned device references it, an owned number contains its `addressId`, or `/addresses/{addressId}/numbers` contains an owned number.
+- Device creation can affect billing, and changing an address can deactivate associated telephone numbers depending on country. Every write-tool description advertises the account change and potential charges.
+- Device password rotation intentionally redacts the complete credential container, including sipgate's one-time password response.
 - Number routing uses sipgate's documented `endpointId`. Obtain existing IDs from the read tools; a phoneline ID such as `p0` is the documented example.
 - `set_forwarding` replaces the complete phoneline forwarding list. Pass `forwardings: []` to remove all forwardings. A `timeout` of `0` represents immediate forwarding.
 - `send_sms` refuses to post unless `GET /{userId}/sms` returns the requested (or first available) SMS extension.
@@ -159,7 +191,7 @@ Every write tool reads current state first and returns a JSON object with `befor
 
 ## Read-only mode
 
-Set `SIPGATE_MCP_READONLY=1` to register only the seven read tools. Write tools are absent from `tools/list`, rather than merely failing when called.
+Set `SIPGATE_MCP_READONLY=1` to register only the 18 read tools. Write tools are absent from `tools/list`, rather than merely failing when called.
 
 ```bash
 export SIPGATE_MCP_READONLY=1

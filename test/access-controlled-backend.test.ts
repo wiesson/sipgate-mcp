@@ -5,15 +5,28 @@ import {
   createAccessControlledBackend,
 } from "../src/backend/access-controlled-backend.js";
 import type {
+  AddressUpdateInput,
   AuthenticatedUserContext,
+  DeviceSettingsInput,
   DeviceType,
   ForwardingRule,
   HistoryQuery,
+  JsonObject,
   JsonValue,
+  LocalPrefixInput,
   MutationResult,
   PaginationInput,
+  QuickDialInput,
   TelephonyBackend,
 } from "../src/backend/telephony-backend.js";
+
+function itemsFrom(value: JsonValue): JsonObject[] {
+  if (!value || Array.isArray(value) || typeof value !== "object") return [];
+  const listed = value.items;
+  return Array.isArray(listed)
+    ? listed.filter((item): item is JsonObject => Boolean(item) && !Array.isArray(item) && typeof item === "object")
+    : [];
+}
 
 class FakeBackend implements TelephonyBackend {
   public calls: Array<{ method: string; args: unknown[] }> = [];
@@ -30,6 +43,9 @@ class FakeBackend implements TelephonyBackend {
     }],
   };
   public devices: JsonValue = { items: [{ id: "e0", userId: "w0" }] };
+  public addresses: JsonValue = {
+    items: [{ addressId: "123" }, { addressId: "999" }],
+  };
 
   private record(method: string, args: unknown[], result: JsonValue): Promise<JsonValue> {
     this.calls.push({ method, args });
@@ -71,6 +87,9 @@ class FakeBackend implements TelephonyBackend {
       },
     });
   }
+  getUserNumbers(userId: string): Promise<JsonValue> {
+    return this.record("getUserNumbers", [userId], { items: [] });
+  }
   listPhonelines(userId: string): Promise<JsonValue> {
     const object = this.routing as { users?: Array<{ phonelines?: JsonValue }> };
     return this.record("listPhonelines", [userId], {
@@ -79,6 +98,39 @@ class FakeBackend implements TelephonyBackend {
   }
   listDevices(userId?: string, types?: DeviceType[]): Promise<JsonValue> {
     return this.record("listDevices", [userId, types], this.devices);
+  }
+  getDevice(deviceId: string): Promise<JsonValue> {
+    const device = itemsFrom(this.devices).find((item) => item.id === deviceId) ?? { id: deviceId };
+    return this.record("getDevice", [deviceId], device);
+  }
+  getDeviceCallerId(deviceId: string): Promise<JsonValue> {
+    return this.record("getDeviceCallerId", [deviceId], { value: "+49211123456" });
+  }
+  getDeviceLocalPrefix(deviceId: string): Promise<JsonValue> {
+    return this.record("getDeviceLocalPrefix", [deviceId], { active: true, value: "0211" });
+  }
+  getDeviceTariffAnnouncement(deviceId: string): Promise<JsonValue> {
+    return this.record("getDeviceTariffAnnouncement", [deviceId], { enabled: false });
+  }
+  getDeviceSingleRowDisplay(deviceId: string): Promise<JsonValue> {
+    return this.record("getDeviceSingleRowDisplay", [deviceId], { enabled: false });
+  }
+  getDeviceContingents(userId: string, deviceId: string): Promise<JsonValue> {
+    return this.record("getDeviceContingents", [userId, deviceId], { contingents: [] });
+  }
+  listAddresses(): Promise<JsonValue> {
+    return this.record("listAddresses", [], this.addresses);
+  }
+  getAddress(addressId: number): Promise<JsonValue> {
+    return this.record("getAddress", [addressId], { addressId: String(addressId) });
+  }
+  listAddressNumbers(addressId: number): Promise<JsonValue> {
+    return this.record("listAddressNumbers", [addressId], {
+      items: addressId === 123 ? [{ id: "n0", number: "+49211123456" }] : [],
+    });
+  }
+  validateQuickDialNumber(quickDialNumber: string): Promise<JsonValue> {
+    return this.record("validateQuickDialNumber", [quickDialNumber], { valid: true });
   }
   getRouting(userId?: string): Promise<JsonValue> {
     return this.record("getRouting", [userId], this.routing);
@@ -100,6 +152,60 @@ class FakeBackend implements TelephonyBackend {
   }
   setDnd(deviceId: string, enabled: boolean): Promise<MutationResult> {
     return this.mutation("setDnd", [deviceId, enabled]);
+  }
+  updateDevice(deviceId: string, settings: DeviceSettingsInput): Promise<MutationResult> {
+    return this.mutation("updateDevice", [deviceId, settings]);
+  }
+  deleteDevice(deviceId: string): Promise<MutationResult> {
+    return this.mutation("deleteDevice", [deviceId]);
+  }
+  setDeviceAlias(deviceId: string, value?: string): Promise<MutationResult> {
+    return this.mutation("setDeviceAlias", [deviceId, value]);
+  }
+  setDeviceCallerId(deviceId: string, value?: string): Promise<MutationResult> {
+    return this.mutation("setDeviceCallerId", [deviceId, value]);
+  }
+  setDeviceLocalPrefix(deviceId: string, input: LocalPrefixInput): Promise<MutationResult> {
+    return this.mutation("setDeviceLocalPrefix", [deviceId, input]);
+  }
+  setDeviceTariffAnnouncement(deviceId: string, enabled?: boolean): Promise<MutationResult> {
+    return this.mutation("setDeviceTariffAnnouncement", [deviceId, enabled]);
+  }
+  setDeviceSingleRowDisplay(deviceId: string, enabled?: boolean): Promise<MutationResult> {
+    return this.mutation("setDeviceSingleRowDisplay", [deviceId, enabled]);
+  }
+  setExternalDeviceTargetNumber(deviceId: string, number?: string): Promise<MutationResult> {
+    return this.mutation("setExternalDeviceTargetNumber", [deviceId, number]);
+  }
+  setExternalDeviceIncomingCallDisplay(
+    deviceId: string,
+    incomingCallDisplay: "CALLED_NUMBER" | "CALLER_NUMBER",
+  ): Promise<MutationResult> {
+    return this.mutation("setExternalDeviceIncomingCallDisplay", [deviceId, incomingCallDisplay]);
+  }
+  changeDevicePassword(deviceId: string): Promise<MutationResult> {
+    return this.mutation("changeDevicePassword", [deviceId]);
+  }
+  createRegisterDevice(userId: string, alias?: string): Promise<MutationResult> {
+    return this.mutation("createRegisterDevice", [userId, alias]);
+  }
+  createMobileDevice(userId: string, alias?: string): Promise<MutationResult> {
+    return this.mutation("createMobileDevice", [userId, alias]);
+  }
+  createExternalDevice(userId: string, alias?: string, number?: string): Promise<MutationResult> {
+    return this.mutation("createExternalDevice", [userId, alias, number]);
+  }
+  createQuickDial(input: QuickDialInput): Promise<MutationResult> {
+    return this.mutation("createQuickDial", [input]);
+  }
+  updateQuickDial(quickDialId: string, input: QuickDialInput): Promise<MutationResult> {
+    return this.mutation("updateQuickDial", [quickDialId, input]);
+  }
+  deleteQuickDial(numberId: string): Promise<MutationResult> {
+    return this.mutation("deleteQuickDial", [numberId]);
+  }
+  updateAddress(addressId: number, input: AddressUpdateInput): Promise<MutationResult> {
+    return this.mutation("updateAddress", [addressId, input]);
   }
   sendSms(input: {
     userId: string;
@@ -289,4 +395,135 @@ test("user scope still rejects a foreign routing destination", async () => {
 
   await assert.rejects(backend.setNumberRouting("n0", "e9"), AccessPolicyError);
   assert.equal(delegate.calls.some((call) => call.method === "setUserNumberRouting"), false);
+});
+
+test("user scope rejects foreign device IDs for every new device-targeted operation", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+  const operations: Array<() => Promise<unknown>> = [
+    () => backend.updateDevice("e9", { dnd: true }),
+    () => backend.deleteDevice("e9"),
+    () => backend.setDeviceAlias("e9", "Foreign"),
+    () => backend.setDeviceCallerId("e9", "+49211123456"),
+    () => backend.setDeviceLocalPrefix("e9", { active: true, value: "0211" }),
+    () => backend.setDeviceTariffAnnouncement("e9", true),
+    () => backend.setDeviceSingleRowDisplay("e9", true),
+    () => backend.setExternalDeviceTargetNumber("e9", "+49211234567"),
+    () => backend.setExternalDeviceIncomingCallDisplay("e9", "CALLER_NUMBER"),
+    () => backend.changeDevicePassword("e9"),
+  ];
+
+  for (const operation of operations) await assert.rejects(operation(), AccessPolicyError);
+  assert.equal(delegate.calls.some((call) => [
+    "updateDevice",
+    "deleteDevice",
+    "setDeviceAlias",
+    "setDeviceCallerId",
+    "setDeviceLocalPrefix",
+    "setDeviceTariffAnnouncement",
+    "setDeviceSingleRowDisplay",
+    "setExternalDeviceTargetNumber",
+    "setExternalDeviceIncomingCallDisplay",
+    "changeDevicePassword",
+  ].includes(call.method)), false);
+});
+
+test("user scope rejects foreign number IDs and caller-ID numbers", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await assert.rejects(
+    backend.updateQuickDial("n9", { userId: "w0", number: "43" }),
+    AccessPolicyError,
+  );
+  await assert.rejects(backend.deleteQuickDial("n9"), AccessPolicyError);
+  await assert.rejects(backend.setDeviceCallerId("e0", "+49211999999"), AccessPolicyError);
+  assert.equal(delegate.calls.some((call) => [
+    "updateQuickDial",
+    "deleteQuickDial",
+    "setDeviceCallerId",
+  ].includes(call.method)), false);
+});
+
+test("user scope accepts owned addresses and rejects foreign address IDs", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+  const address = {
+    city: "Düsseldorf",
+    countrycode: "DE",
+    postcode: "40219",
+  };
+
+  await backend.updateAddress(123, address);
+  await backend.updateDevice("e0", { emergencyAddressId: 123 });
+  await assert.rejects(backend.updateAddress(999, address), AccessPolicyError);
+  await assert.rejects(
+    backend.updateDevice("e0", { emergencyAddressId: 999 }),
+    AccessPolicyError,
+  );
+
+  const listed = await backend.listAddresses();
+  assert.deepEqual(listed, { items: [{ addressId: "123" }] });
+  assert.equal(delegate.calls.some((call) =>
+    call.method === "updateAddress" && call.args[0] === 999), false);
+});
+
+test("user scope rejects device and quick-dial creation for a foreign user", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await assert.rejects(
+    async () => backend.createRegisterDevice("w1", "Register"),
+    AccessPolicyError,
+  );
+  await assert.rejects(
+    async () => backend.createMobileDevice("w1", "Mobile"),
+    AccessPolicyError,
+  );
+  await assert.rejects(
+    async () => backend.createExternalDevice("w1", "External", "+49211234567"),
+    AccessPolicyError,
+  );
+  await assert.rejects(
+    async () => backend.createQuickDial({ userId: "w1", number: "42" }),
+    AccessPolicyError,
+  );
+});
+
+test("user scope rejects foreign device and address IDs on read tools", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await assert.rejects(backend.getDevice("e9"), AccessPolicyError);
+  await assert.rejects(backend.getDeviceContingents("w0", "e9"), AccessPolicyError);
+  await assert.rejects(backend.getAddress(999), AccessPolicyError);
+  await assert.rejects(backend.listAddressNumbers(999), AccessPolicyError);
+});
+
+test("user-scoped mutations fail closed with AccessPolicyError when ownership cannot be read", async () => {
+  const deviceDelegate = new FakeBackend();
+  deviceDelegate.listDevices = async () => {
+    throw new Error("device lookup unavailable");
+  };
+  const deviceBackend = await createAccessControlledBackend(deviceDelegate, "user");
+  await assert.rejects(deviceBackend.deleteDevice("e0"), AccessPolicyError);
+
+  const numberDelegate = new FakeBackend();
+  numberDelegate.listUserNumbers = async () => {
+    throw new Error("number lookup unavailable");
+  };
+  const numberBackend = await createAccessControlledBackend(numberDelegate, "user");
+  await assert.rejects(numberBackend.deleteQuickDial("n0"), AccessPolicyError);
+
+  const addressDelegate = new FakeBackend();
+  addressDelegate.listAddressNumbers = async () => {
+    throw new Error("address relationship lookup unavailable");
+  };
+  addressDelegate.routing = { numbers: [], users: [{ userId: "w0", phonelines: [] }] };
+  const addressBackend = await createAccessControlledBackend(addressDelegate, "user");
+  await assert.rejects(addressBackend.updateAddress(123, {
+    city: "Düsseldorf",
+    countrycode: "DE",
+    postcode: "40219",
+  }), AccessPolicyError);
 });

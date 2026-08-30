@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
+  AddressUpdateInput,
   AuthenticatedUserContext,
+  DeviceSettingsInput,
   DeviceType,
   ForwardingRule,
   HistoryQuery,
   JsonValue,
+  LocalPrefixInput,
   MutationResult,
   PaginationInput,
+  QuickDialInput,
   TelephonyBackend,
 } from "../src/backend/telephony-backend.js";
 import { createToolDefinitions } from "../src/tools/definitions.js";
@@ -35,9 +39,30 @@ class FakeBackend implements TelephonyBackend {
   listUserNumbers(userId: string, input: PaginationInput): Promise<JsonValue> {
     return this.read("listUserNumbers", userId, input);
   }
+  getUserNumbers(userId: string): Promise<JsonValue> { return this.read("getUserNumbers", userId); }
   listPhonelines(userId: string): Promise<JsonValue> { return this.read("listPhonelines", userId); }
   listDevices(userId?: string, types?: DeviceType[]): Promise<JsonValue> {
     return this.read("listDevices", userId, types);
+  }
+  getDevice(deviceId: string): Promise<JsonValue> { return this.read("getDevice", deviceId); }
+  getDeviceCallerId(deviceId: string): Promise<JsonValue> { return this.read("getDeviceCallerId", deviceId); }
+  getDeviceLocalPrefix(deviceId: string): Promise<JsonValue> { return this.read("getDeviceLocalPrefix", deviceId); }
+  getDeviceTariffAnnouncement(deviceId: string): Promise<JsonValue> {
+    return this.read("getDeviceTariffAnnouncement", deviceId);
+  }
+  getDeviceSingleRowDisplay(deviceId: string): Promise<JsonValue> {
+    return this.read("getDeviceSingleRowDisplay", deviceId);
+  }
+  getDeviceContingents(userId: string, deviceId: string): Promise<JsonValue> {
+    return this.read("getDeviceContingents", userId, deviceId);
+  }
+  listAddresses(): Promise<JsonValue> { return this.read("listAddresses"); }
+  getAddress(addressId: number): Promise<JsonValue> { return this.read("getAddress", addressId); }
+  listAddressNumbers(addressId: number): Promise<JsonValue> {
+    return this.read("listAddressNumbers", addressId);
+  }
+  validateQuickDialNumber(quickDialNumber: string): Promise<JsonValue> {
+    return this.read("validateQuickDialNumber", quickDialNumber);
   }
   getRouting(userId?: string): Promise<JsonValue> { return this.read("getRouting", userId); }
   getCallHistory(query: HistoryQuery): Promise<JsonValue> { return this.read("getCallHistory", query); }
@@ -53,6 +78,58 @@ class FakeBackend implements TelephonyBackend {
   }
   setDnd(deviceId: string, enabled: boolean): Promise<MutationResult> {
     return this.write("setDnd", deviceId, enabled);
+  }
+  updateDevice(deviceId: string, settings: DeviceSettingsInput): Promise<MutationResult> {
+    return this.write("updateDevice", deviceId, settings);
+  }
+  deleteDevice(deviceId: string): Promise<MutationResult> { return this.write("deleteDevice", deviceId); }
+  setDeviceAlias(deviceId: string, value?: string): Promise<MutationResult> {
+    return this.write("setDeviceAlias", deviceId, value);
+  }
+  setDeviceCallerId(deviceId: string, value?: string): Promise<MutationResult> {
+    return this.write("setDeviceCallerId", deviceId, value);
+  }
+  setDeviceLocalPrefix(deviceId: string, input: LocalPrefixInput): Promise<MutationResult> {
+    return this.write("setDeviceLocalPrefix", deviceId, input);
+  }
+  setDeviceTariffAnnouncement(deviceId: string, enabled?: boolean): Promise<MutationResult> {
+    return this.write("setDeviceTariffAnnouncement", deviceId, enabled);
+  }
+  setDeviceSingleRowDisplay(deviceId: string, enabled?: boolean): Promise<MutationResult> {
+    return this.write("setDeviceSingleRowDisplay", deviceId, enabled);
+  }
+  setExternalDeviceTargetNumber(deviceId: string, number?: string): Promise<MutationResult> {
+    return this.write("setExternalDeviceTargetNumber", deviceId, number);
+  }
+  setExternalDeviceIncomingCallDisplay(
+    deviceId: string,
+    incomingCallDisplay: "CALLED_NUMBER" | "CALLER_NUMBER",
+  ): Promise<MutationResult> {
+    return this.write("setExternalDeviceIncomingCallDisplay", deviceId, incomingCallDisplay);
+  }
+  changeDevicePassword(deviceId: string): Promise<MutationResult> {
+    return this.write("changeDevicePassword", deviceId);
+  }
+  createRegisterDevice(userId: string, alias?: string): Promise<MutationResult> {
+    return this.write("createRegisterDevice", userId, alias);
+  }
+  createMobileDevice(userId: string, alias?: string): Promise<MutationResult> {
+    return this.write("createMobileDevice", userId, alias);
+  }
+  createExternalDevice(userId: string, alias?: string, number?: string): Promise<MutationResult> {
+    return this.write("createExternalDevice", userId, alias, number);
+  }
+  createQuickDial(input: QuickDialInput): Promise<MutationResult> {
+    return this.write("createQuickDial", input);
+  }
+  updateQuickDial(quickDialId: string, input: QuickDialInput): Promise<MutationResult> {
+    return this.write("updateQuickDial", quickDialId, input);
+  }
+  deleteQuickDial(numberId: string): Promise<MutationResult> {
+    return this.write("deleteQuickDial", numberId);
+  }
+  updateAddress(addressId: number, input: AddressUpdateInput): Promise<MutationResult> {
+    return this.write("updateAddress", addressId, input);
   }
   sendSms(input: {
     userId: string;
@@ -103,6 +180,72 @@ test("list_devices tool", async () => {
   const backend = new FakeBackend();
   await invoke(backend, "list_devices", { user_id: "w0", types: ["register"] });
   assert.deepEqual(backend.calls, [{ method: "listDevices", args: ["w0", ["register"]] }]);
+});
+
+test("get_device tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "get_device", { device_id: "e0" });
+  assert.deepEqual(backend.calls, [{ method: "getDevice", args: ["e0"] }]);
+});
+
+test("get_device_caller_id tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "get_device_caller_id", { device_id: "e0" });
+  assert.deepEqual(backend.calls, [{ method: "getDeviceCallerId", args: ["e0"] }]);
+});
+
+test("get_device_local_prefix tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "get_device_local_prefix", { device_id: "e0" });
+  assert.deepEqual(backend.calls, [{ method: "getDeviceLocalPrefix", args: ["e0"] }]);
+});
+
+test("get_device_tariff_announcement tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "get_device_tariff_announcement", { device_id: "e0" });
+  assert.deepEqual(backend.calls, [{ method: "getDeviceTariffAnnouncement", args: ["e0"] }]);
+});
+
+test("get_device_single_row_display tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "get_device_single_row_display", { device_id: "e0" });
+  assert.deepEqual(backend.calls, [{ method: "getDeviceSingleRowDisplay", args: ["e0"] }]);
+});
+
+test("get_device_contingents tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "get_device_contingents", { user_id: "w0", device_id: "y0" });
+  assert.deepEqual(backend.calls, [{ method: "getDeviceContingents", args: ["w0", "y0"] }]);
+});
+
+test("list_user_numbers tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "list_user_numbers", { user_id: "w0" });
+  assert.deepEqual(backend.calls, [{ method: "getUserNumbers", args: ["w0"] }]);
+});
+
+test("validate_quick_dial tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "validate_quick_dial", { quick_dial_number: "42" });
+  assert.deepEqual(backend.calls, [{ method: "validateQuickDialNumber", args: ["42"] }]);
+});
+
+test("list_addresses tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "list_addresses", {});
+  assert.deepEqual(backend.calls, [{ method: "listAddresses", args: [] }]);
+});
+
+test("get_address tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "get_address", { address_id: 123 });
+  assert.deepEqual(backend.calls, [{ method: "getAddress", args: [123] }]);
+});
+
+test("list_address_numbers tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "list_address_numbers", { address_id: 123 });
+  assert.deepEqual(backend.calls, [{ method: "listAddressNumbers", args: [123] }]);
 });
 
 test("get_routing tool", async () => {
@@ -156,6 +299,146 @@ test("set_dnd tool", async () => {
   assert.deepEqual(backend.calls, [{ method: "setDnd", args: ["e0", true] }]);
 });
 
+test("update_device tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "update_device", { device_id: "e0", dnd: true, emergency_address_id: 123 });
+  assert.deepEqual(backend.calls, [{
+    method: "updateDevice",
+    args: ["e0", { dnd: true, emergencyAddressId: 123 }],
+  }]);
+});
+
+test("delete_device tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "delete_device", { device_id: "e0" });
+  assert.deepEqual(backend.calls, [{ method: "deleteDevice", args: ["e0"] }]);
+});
+
+test("set_device_alias tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "set_device_alias", { device_id: "e0", value: "Desk phone" });
+  assert.deepEqual(backend.calls, [{ method: "setDeviceAlias", args: ["e0", "Desk phone"] }]);
+});
+
+test("set_device_caller_id tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "set_device_caller_id", { device_id: "e0", value: "+49211123456" });
+  assert.deepEqual(backend.calls, [{ method: "setDeviceCallerId", args: ["e0", "+49211123456"] }]);
+});
+
+test("set_device_local_prefix tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "set_device_local_prefix", { device_id: "e0", active: true, value: "030" });
+  assert.deepEqual(backend.calls, [{
+    method: "setDeviceLocalPrefix",
+    args: ["e0", { active: true, value: "030" }],
+  }]);
+});
+
+test("set_device_tariff_announcement tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "set_device_tariff_announcement", { device_id: "e0", enabled: true });
+  assert.deepEqual(backend.calls, [{ method: "setDeviceTariffAnnouncement", args: ["e0", true] }]);
+});
+
+test("set_device_single_row_display tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "set_device_single_row_display", { device_id: "e0", enabled: true });
+  assert.deepEqual(backend.calls, [{ method: "setDeviceSingleRowDisplay", args: ["e0", true] }]);
+});
+
+test("set_external_device_target_number tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "set_external_device_target_number", { device_id: "x0", number: "+49211234567" });
+  assert.deepEqual(backend.calls, [{ method: "setExternalDeviceTargetNumber", args: ["x0", "+49211234567"] }]);
+});
+
+test("set_external_device_incoming_call_display tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "set_external_device_incoming_call_display", {
+    device_id: "x0",
+    incoming_call_display: "CALLER_NUMBER",
+  });
+  assert.deepEqual(backend.calls, [{
+    method: "setExternalDeviceIncomingCallDisplay",
+    args: ["x0", "CALLER_NUMBER"],
+  }]);
+});
+
+test("change_device_password tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "change_device_password", { device_id: "e0" });
+  assert.deepEqual(backend.calls, [{ method: "changeDevicePassword", args: ["e0"] }]);
+});
+
+test("create_register_device tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "create_register_device", { user_id: "w0", alias: "Desk phone" });
+  assert.deepEqual(backend.calls, [{ method: "createRegisterDevice", args: ["w0", "Desk phone"] }]);
+});
+
+test("create_mobile_device tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "create_mobile_device", { user_id: "w0", alias: "Mobile" });
+  assert.deepEqual(backend.calls, [{ method: "createMobileDevice", args: ["w0", "Mobile"] }]);
+});
+
+test("create_external_device tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "create_external_device", {
+    user_id: "w0",
+    alias: "External",
+    number: "+49211234567",
+  });
+  assert.deepEqual(backend.calls, [{
+    method: "createExternalDevice",
+    args: ["w0", "External", "+49211234567"],
+  }]);
+});
+
+test("create_quick_dial tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "create_quick_dial", { user_id: "w0", number: "42" });
+  assert.deepEqual(backend.calls, [{ method: "createQuickDial", args: [{ userId: "w0", number: "42" }] }]);
+});
+
+test("update_quick_dial tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "update_quick_dial", { quick_dial_id: "n0", user_id: "w0", number: "43" });
+  assert.deepEqual(backend.calls, [{
+    method: "updateQuickDial",
+    args: ["n0", { userId: "w0", number: "43" }],
+  }]);
+});
+
+test("delete_quick_dial tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "delete_quick_dial", { number_id: "n0" });
+  assert.deepEqual(backend.calls, [{ method: "deleteQuickDial", args: ["n0"] }]);
+});
+
+test("update_address tool", async () => {
+  const backend = new FakeBackend();
+  await invoke(backend, "update_address", {
+    address_id: 123,
+    city: "Düsseldorf",
+    countrycode: "DE",
+    postcode: "40219",
+    street: "Gladbacher Str.",
+    number: "74",
+  });
+  assert.deepEqual(backend.calls, [{
+    method: "updateAddress",
+    args: [123, {
+      city: "Düsseldorf",
+      countrycode: "DE",
+      postcode: "40219",
+      number: "74",
+      street: "Gladbacher Str.",
+    }],
+  }]);
+});
+
 test("send_sms tool", async () => {
   const backend = new FakeBackend();
   await invoke(backend, "send_sms", {
@@ -195,8 +478,33 @@ test("read-only mode does not register write tools", () => {
     "list_users",
     "list_numbers",
     "list_devices",
+    "get_device",
+    "get_device_caller_id",
+    "get_device_local_prefix",
+    "get_device_tariff_announcement",
+    "get_device_single_row_display",
+    "get_device_contingents",
+    "list_user_numbers",
+    "validate_quick_dial",
+    "list_addresses",
+    "get_address",
+    "list_address_numbers",
     "get_routing",
     "call_history",
     "get_settings",
   ]);
+});
+
+test("tool annotations and charge warnings distinguish every read and write tool", () => {
+  const definitions = createToolDefinitions(new FakeBackend());
+  for (const definition of definitions) {
+    if (definition.annotations.readOnlyHint) continue;
+    assert.match(
+      definition.description,
+      /CHANGES .*SIPGATE ACCOUNT AND MAY INCUR CHARGES/,
+      `${definition.name} must warn about account changes and possible charges`,
+    );
+  }
+  assert.equal(definitions.filter((tool) => tool.annotations.readOnlyHint).length, 18);
+  assert.equal(definitions.filter((tool) => !tool.annotations.readOnlyHint).length, 22);
 });

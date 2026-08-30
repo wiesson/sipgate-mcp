@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.0 - 2026-08-30
+
+- Add complete self-service tools for the requested sipgate v2 device surface:
+  device reads, updates and deletion; aliases; caller ID; local prefix; tariff
+  announcement; single-row display; external-device target/display settings;
+  password rotation; register/mobile/external device creation; and contingents.
+- Add direct user-number reads plus quick-dial validation, creation, updates,
+  and deletion without routing these operations through phonelines.
+- Add emergency-address listing, detail, number association, and updates for
+  assigning verified addresses to register devices.
+- Enforce every new user-scoped resource target against owned devices, owned
+  numbers (including the device fallback on phoneline-less accounts), or
+  addresses associated with an owned device/number. Unknown ownership fails
+  closed with an access-policy error; administrator account scope retains its
+  broader behavior.
+- Return `{before, after}` for all mutations, with explicit no-read-back notes
+  for creates and deletes. Redact credential containers and the one-time
+  password returned by device password rotation.
+- Expand read-only mode from seven to 18 read tools; none of the 17 new write
+  tools are registered in read-only mode.
+- Bump the package, CLI, and setup skill to version 0.5.0.
+
 ## 0.4.0 - 2026-08-30
 
 - Treat a 403/404 from the phoneline endpoints as "feature absent" instead of a

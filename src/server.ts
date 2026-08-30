@@ -7,6 +7,7 @@ import {
 import { z } from "zod";
 import type { AccessScope, TelephonyBackend } from "./backend/telephony-backend.js";
 import { createToolDefinitions } from "./tools/definitions.js";
+import { VERSION } from "./version.js";
 
 function publicError(error: unknown): string {
   if (error instanceof z.ZodError) {
@@ -36,7 +37,7 @@ export function createServer(
   const definitions = createToolDefinitions(backend, readonly, accessScope);
   const byName = new Map(definitions.map((definition) => [definition.name, definition]));
   const server = new Server(
-    { name: "sipgate-mcp", version: "0.2.0" },
+    { name: "sipgate-mcp", version: VERSION },
     {
       capabilities: { tools: {} },
       instructions: accessScope === "user"

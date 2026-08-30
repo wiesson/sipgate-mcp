@@ -14,8 +14,19 @@ function backend(): TelephonyBackend {
     listUsers: async () => ({ items: [] }),
     listNumbers: async () => ({ items: [] }),
     listUserNumbers: async () => ({ items: [] }),
+    getUserNumbers: async () => ({ items: [] }),
     listPhonelines: async () => ({ items: [] }),
     listDevices: async () => ({ items: [] }),
+    getDevice: async () => ({}),
+    getDeviceCallerId: async () => ({}),
+    getDeviceLocalPrefix: async () => ({}),
+    getDeviceTariffAnnouncement: async () => ({}),
+    getDeviceSingleRowDisplay: async () => ({}),
+    getDeviceContingents: async () => ({ contingents: [] }),
+    listAddresses: async () => ({ items: [] }),
+    getAddress: async () => ({}),
+    listAddressNumbers: async () => ({ items: [] }),
+    validateQuickDialNumber: async () => ({}),
     getRouting: async () => ({ numbers: [], users: [] }),
     getCallHistory: async () => ({ items: [] }),
     getSettings: async () => ({ users: [] }),
@@ -23,6 +34,23 @@ function backend(): TelephonyBackend {
     setUserNumberRouting: mutation,
     setForwarding: mutation,
     setDnd: mutation,
+    updateDevice: mutation,
+    deleteDevice: mutation,
+    setDeviceAlias: mutation,
+    setDeviceCallerId: mutation,
+    setDeviceLocalPrefix: mutation,
+    setDeviceTariffAnnouncement: mutation,
+    setDeviceSingleRowDisplay: mutation,
+    setExternalDeviceTargetNumber: mutation,
+    setExternalDeviceIncomingCallDisplay: mutation,
+    changeDevicePassword: mutation,
+    createRegisterDevice: mutation,
+    createMobileDevice: mutation,
+    createExternalDevice: mutation,
+    createQuickDial: mutation,
+    updateQuickDial: mutation,
+    deleteQuickDial: mutation,
+    updateAddress: mutation,
     sendSms: mutation,
     initiateCall: mutation,
     initiateUserCall: mutation,
@@ -38,9 +66,9 @@ test("MCP server lists JSON-schema tools and executes a tool over the SDK transp
 
   try {
     const listed = await client.listTools();
-    assert.equal(listed.tools.length, 12);
+    assert.equal(listed.tools.length, 40);
     assert.equal(listed.tools.find((tool) => tool.name === "call_history")?.inputSchema.type, "object");
-    assert.equal(client.getServerVersion()?.version, "0.2.0");
+    assert.equal(client.getServerVersion()?.version, "0.5.0");
     assert.match(client.getInstructions() ?? "", /authenticated user's resources/);
 
     const result = await client.callTool({ name: "account_info", arguments: {} });
@@ -63,7 +91,7 @@ test("MCP server advertises administrator account scope and read-only mode", asy
     assert.match(client.getInstructions() ?? "", /account scope/);
     assert.match(client.getInstructions() ?? "", /administrator/);
     assert.match(client.getInstructions() ?? "", /read-only/);
-    assert.equal((await client.listTools()).tools.length, 7);
+    assert.equal((await client.listTools()).tools.length, 18);
   } finally {
     await client.close();
     await server.close();
