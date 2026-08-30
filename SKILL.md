@@ -2,7 +2,7 @@
 name: sipgate-mcp
 description: Install and securely configure the sipgate MCP server when a user asks to set up or connect a sipgate account to Codex or Claude. Do not use for ordinary sipgate product questions.
 metadata:
-  version: "0.4.0"
+  version: "0.5.0"
 ---
 
 # Set up sipgate MCP
@@ -10,19 +10,19 @@ metadata:
 Install the matching CLI version with one available package manager:
 
 ```bash
-vp install -g sipgate-mcp@0.4.0
+vp install -g sipgate-mcp@0.5.0
 ```
 
 ```bash
-npm install -g sipgate-mcp@0.4.0
+npm install -g sipgate-mcp@0.5.0
 ```
 
 ```bash
-pnpm add -g sipgate-mcp@0.4.0
+pnpm add -g sipgate-mcp@0.5.0
 ```
 
 Run only one install command. Confirm that `sipgate-mcp --version` reports
-`0.4.0` before continuing.
+`0.5.0` before continuing.
 
 ## Security boundary
 
@@ -35,6 +35,33 @@ Run only one install command. Confirm that `sipgate-mcp --version` reports
 - Keep setup user-scoped. Let the setup prompt decide read-only versus write
   tools, and do not pass `--allow-writes` on the user's behalf. Never enable
   account-wide administrator access without an explicit user request.
+- The automated-recording greeting is account-global and intentionally fails
+  closed in user scope; its read/create/delete tools require explicitly
+  requested administrator account scope.
+- User scope remains the resource boundary for write tools: device IDs,
+  phone-number IDs, emergency-address IDs, notification IDs, live-call
+  participants, phonelines, nested parallel forwardings, voicemails and
+  greetings, attached devices, faxlines, and automated-recording extensions
+  are checked against the authenticated user's ownership before account
+  changes are sent.
+- Contacts and the incoming blacklist are account-wide resources. In user
+  scope, never call one of their write tools unless the user explicitly agrees
+  to the account-wide effect and the call includes
+  `confirm_account_wide: true`. The same confirmation is always required to
+  cancel a number porting, and user-scoped sipgate.io settings updates require
+  it as well.
+- History writes are limited to owned entries. An omitted ID list for bulk
+  deletion is expanded to entries from owned connection IDs; never work around
+  that boundary with account scope unless the user explicitly requested
+  administrator-wide access.
+- Never display device credentials. Password rotation deliberately redacts the
+  one-time password returned by sipgate.
+- Fax send/resend and call-initiating voicemail playback/recording actions may
+  incur charges. Call and automated recording are legally sensitive; in
+  Germany the caller is responsible for obtaining every participant's consent,
+  even when the recording announcement is off.
+- Contact CSV imports and history/contact deletions are destructive. Cancelling
+  a number porting is irreversible through the v2 API.
 - Do not remove or replace an existing MCP configuration without the user's
   approval.
 
@@ -55,8 +82,26 @@ sipgate-mcp setup --client claude
 
 Omit `--client` only when both installed clients should be configured. The
 setup delegates PAT entry directly to macOS Keychain and registers a
-user-scoped, read-only stdio server. The client starts and stops that process;
-do not launch `sipgate-mcp` as a daemon.
+user-scoped stdio server. Its interactive prompt asks whether write tools should
+be enabled; do not answer that choice on the user's behalf. The client starts
+and stops that process, so do not launch `sipgate-mcp` as a daemon.
+
+Version 0.5.0 adds user-scoped device, quick-dial, user-number, emergency-
+address, notification, live-call-control, phoneline, voicemail/greeting,
+automated-recording, fax, contact, blacklist, restriction, history-management,
+porting, balance, and sipgate.io self-service. It supports accounts without
+phonelines: direct number reads use `/{userId}/numbers`, ownership checks retain
+the device-based number fallback, and phoneline-only tools return an explicit
+unavailable result instead of surfacing sipgate's 403. Active calls are
+filtered by participants matching owned devices or numbers; nested voicemail,
+greeting, forwarding, attached-device, faxline, and recording-extension IDs
+are verified before use. History updates/deletes and exports are constrained to
+owned connection IDs; account-wide contacts/blacklist writes and sipgate.io
+updates require explicit confirmation in user scope, as does porting
+cancellation. Device/faxline/phoneline creation, fax transmission, call
+sessions, recording, and other writes may incur charges or carry legal
+consequences, and address changes can deactivate associated numbers depending
+on country.
 
 When credentials already exist in Keychain, setup reuses them without another
 prompt. Use `--replace-credentials` only when the user explicitly wants to

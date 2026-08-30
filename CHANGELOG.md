@@ -1,5 +1,113 @@
 # Changelog
 
+## 0.5.0 - 2026-08-30
+- Add the final 32 tools for contacts, incoming blocklists, call/product
+  restrictions, history updates/deletes/CSV export, balance, portings,
+  account-wide sipgate.io settings, and webhook logs using the exact v2 paths,
+  verbs, query parameters, and request bodies.
+- Permit account-wide contact, blacklist, balance, porting, sipgate.io, and
+  webhook-log reads in user scope. Require `confirm_account_wide: true` for
+  account-wide contact/blacklist writes, sipgate.io updates in user scope, and
+  every porting cancellation.
+- Verify every single and bulk history mutation against owned history entries.
+  When user scope requests bulk deletion without IDs, enumerate both archived
+  and unarchived entries through owned connection IDs and send only those IDs;
+  never issue an unconstrained account-wide `DELETE /history`.
+- Return `{before, after}` for all new mutations, including explicit
+  no-read-back/deletion notes. Mark contact CSV import, contact/history
+  deletion, and porting cancellation as destructive or irreversible.
+- Add raw-text transport for contact/history CSV exports and explicit
+  403/404-unavailable results for sipgate.io settings and webhook logs.
+- Add 35 phoneline, voicemail/greeting, automated-recording, and faxline-
+  configuration tools covering every requested GET/POST/PUT/DELETE operation,
+  with exact v2 paths and payloads.
+- Add phoneline detail, anonymous-call blocking, attached-device, and parallel-
+  forwarding reads/writes; enforce authenticated-user, owned-phoneline,
+  owned-device, and nested-forwarding boundaries.
+- Add phoneline voicemail settings, greeting upload/activation/deletion,
+  transcription, global voicemail reads, and voicemail playback/recording call
+  sessions. Global results are filtered to voicemail IDs discovered under the
+  authenticated user's phonelines.
+- Add automated call-recording announcement and per-extension settings. User
+  scope accepts settings only for an owned phoneline or faxline extension. The
+  account-global announcement has no user ownership link, so its read/create/
+  delete operations require administrator account scope.
+- Add faxline creation, alias/deletion, caller-ID reads/writes, and tagline
+  updates with owned-faxline and owned-caller-number checks.
+- Return explicit `phonelinesAvailable: false` / `changed: false` results for
+  phoneline-only tools when sipgate returns 403/404, without attempting a
+  mutation. An available but empty phoneline collection still denies access.
+- Warn that voicemail call sessions and recording features may incur charges,
+  and that callers remain responsible for legally required recording consent.
+- Expand read-only registration to 47 read tools and the full write-enabled
+  surface to 129 tools. Add one definition and backend endpoint test per new
+  tool plus foreign-resource and phoneline-less access-policy coverage.
+- Add notification listing, creation, and deletion for call email/SMS, fax
+  email/SMS/report, incoming-SMS email, and voicemail email/SMS targets.
+- Expose established calls and add hangup, hold, mute, recording, transfer,
+  DTMF, and announcement controls with before/after call snapshots.
+- Add faxline and faxline-number reads plus chargeable fax send and resend
+  actions using sipgate's documented session payloads.
+- Restrict user-scoped active calls to participants matching owned devices or
+  phone numbers, verify nested notification IDs before deletion, and verify
+  faxline ownership for reads, notifications, sends, and resends. Unknown or
+  unreadable ownership fails closed.
+- Warn explicitly that fax transmission incurs charges and that call recording
+  can incur charges and requires participant consent in Germany.
+- Keep a shared emergency address from leaking or rewriting other users' data:
+  user scope filters foreign numbers out of an address's number list and
+  refuses to edit an address that other users' numbers are attached to.
+- Establish number ownership from the direct user-number endpoint as well as
+  routing, so quick dials that no phoneline or device routes can still be
+  updated and deleted by their owner.
+- Page through every owned number when deciding ownership instead of stopping
+  after 1000.
+- Redact PUK and ICCID values that arrive outside a credentials wrapper.
+- Establish active-call ownership from the participant sipgate marks as the
+  call owner. Being the remote party of another user's call is not ownership,
+  and a call without a marked owner is denied.
+- Verify that a resent fax belongs to the authenticated user, not just that the
+  faxline does.
+- Accept national phone formats for transfer targets and fax recipients, which
+  the API documents as plain strings.
+- Report the observed HTTP status when a phoneline or recording feature is
+  unavailable, so a denied token scope is no longer indistinguishable from an
+  account that simply has no phoneline layer.
+- Say explicitly when a phoneline change was applied but only its read-back was
+  denied, instead of reporting the feature as unavailable.
+- Accept an owned device as an automated-recording extension; sipgate documents
+  that feature for register endpoints, not only phonelines and faxlines.
+- Refuse to delete an automated-recording greeting other than the one currently
+  configured.
+- Refuse a history deletion whose entry list is present but empty. An empty
+  list serializes to no query parameter, which sipgate reads as "delete the
+  entire account history".
+- Enforce the account-wide confirmation inside SipgateBackend as well, not only
+  at the access-control boundary, since the backend is exported on its own.
+- Reject a bulk history update at sipgate's documented limit of 150 entries.
+- Strip query strings from webhook log URLs, which carry their credentials
+  there as plain strings that key-based redaction cannot see.
+
+- Add complete self-service tools for the requested sipgate v2 device surface:
+  device reads, updates and deletion; aliases; caller ID; local prefix; tariff
+  announcement; single-row display; external-device target/display settings;
+  password rotation; register/mobile/external device creation; and contingents.
+- Add direct user-number reads plus quick-dial validation, creation, updates,
+  and deletion without routing these operations through phonelines.
+- Add emergency-address listing, detail, number association, and updates for
+  assigning verified addresses to register devices.
+- Enforce every new user-scoped resource target against owned devices, owned
+  numbers (including the device fallback on phoneline-less accounts), or
+  addresses associated with an owned device/number. Unknown ownership fails
+  closed with an access-policy error; administrator account scope retains its
+  broader behavior.
+- Return `{before, after}` for all mutations, with explicit no-read-back notes
+  for creates and deletes. Redact credential containers and the one-time
+  password returned by device password rotation.
+- Expand read-only mode from seven to 47 read tools; write tools are never
+  registered in read-only mode.
+- Bump the package, CLI, and setup skill to version 0.5.0.
+
 ## 0.4.0 - 2026-08-30
 
 - Treat a 403/404 from the phoneline endpoints as "feature absent" instead of a
