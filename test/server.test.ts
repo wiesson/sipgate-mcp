@@ -158,7 +158,7 @@ test("MCP server lists JSON-schema tools and executes a tool over the SDK transp
     const listed = await client.listTools();
     assert.equal(listed.tools.length, 129);
     assert.equal(listed.tools.find((tool) => tool.name === "call_history")?.inputSchema.type, "object");
-    assert.equal(client.getServerVersion()?.version, "0.5.0");
+    assert.equal(client.getServerVersion()?.version, "0.5.1");
     assert.match(client.getInstructions() ?? "", /authenticated user's resources/);
 
     const result = await client.callTool({ name: "account_info", arguments: {} });

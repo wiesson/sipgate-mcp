@@ -2,7 +2,7 @@
 name: sipgate-mcp
 description: Install and securely configure the sipgate MCP server when a user asks to set up or connect a sipgate account to Codex or Claude. Do not use for ordinary sipgate product questions.
 metadata:
-  version: "0.5.0"
+  version: "0.5.1"
 ---
 
 # Set up sipgate MCP
@@ -10,19 +10,19 @@ metadata:
 Install the matching CLI version with one available package manager:
 
 ```bash
-vp install -g sipgate-mcp@0.5.0
+vp install -g sipgate-mcp@0.5.1
 ```
 
 ```bash
-npm install -g sipgate-mcp@0.5.0
+npm install -g sipgate-mcp@0.5.1
 ```
 
 ```bash
-pnpm add -g sipgate-mcp@0.5.0
+pnpm add -g sipgate-mcp@0.5.1
 ```
 
 Run only one install command. Confirm that `sipgate-mcp --version` reports
-`0.5.0` before continuing.
+`0.5.1` before continuing.
 
 ## Security boundary
 
@@ -86,7 +86,7 @@ user-scoped stdio server. Its interactive prompt asks whether write tools should
 be enabled; do not answer that choice on the user's behalf. The client starts
 and stops that process, so do not launch `sipgate-mcp` as a daemon.
 
-Version 0.5.0 adds user-scoped device, quick-dial, user-number, emergency-
+Version 0.5.1 adds user-scoped device, quick-dial, user-number, emergency-
 address, notification, live-call-control, phoneline, voicemail/greeting,
 automated-recording, fax, contact, blacklist, restriction, history-management,
 porting, balance, and sipgate.io self-service. It supports accounts without

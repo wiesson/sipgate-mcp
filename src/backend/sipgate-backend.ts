@@ -379,13 +379,28 @@ export class SipgateBackend implements TelephonyBackend {
     { offset, limit }: PaginationInput,
     phonelinesAvailable: boolean,
   ): Promise<JsonValue> {
+    // sipgate's own user-number endpoint is authoritative and lists numbers
+    // that are assigned to the user but routed nowhere yet (endpointId ""),
+    // which endpoint matching against devices would silently drop.
+    const direct = asItems(await optional(
+      this.client.request<JsonValue>(`/${encodeId(userId)}/numbers`),
+    ).then((result) => result.value));
+    if (direct.length > 0) {
+      const page = direct.slice(offset, offset + limit);
+      return sanitize({
+        items: page,
+        pagination: { offset, limit, returned: page.length, totalCount: direct.length },
+        source: "user-numbers",
+        phonelinesAvailable,
+      });
+    }
     const [deviceIds, accountNumbers] = await Promise.all([
       this.listDeviceIds(userId),
       this.listAllAccountNumbers(),
     ]);
     const owned = accountNumbers.filter((number) => {
       const endpointId = stringField(number, "endpointId");
-      return endpointId !== undefined && deviceIds.has(endpointId);
+      return endpointId !== undefined && endpointId !== "" && deviceIds.has(endpointId);
     });
     const page = owned.slice(offset, offset + limit);
     return sanitize({
