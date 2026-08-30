@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildRegistrationCommand,
+  ensureStoredCredentials,
   parseSetupArgs,
 } from "../src/setup.js";
 
@@ -10,6 +11,7 @@ test("parseSetupArgs defaults to both clients and read-only mode", () => {
     allowWrites: false,
     clients: ["codex", "claude"],
     dryRun: false,
+    replaceCredentials: false,
   });
 });
 
@@ -22,11 +24,13 @@ test("parseSetupArgs accepts client selection, writes, and dry-run", () => {
       "claude",
       "--allow-writes",
       "--dry-run",
+      "--replace-credentials",
     ]),
     {
       allowWrites: true,
       clients: ["claude"],
       dryRun: true,
+      replaceCredentials: true,
     },
   );
 });
@@ -60,7 +64,7 @@ test("buildRegistrationCommand creates secret-free Codex configuration", () => {
   });
 });
 
-test("buildRegistrationCommand creates user-scoped Claude configuration", () => {
+test("buildRegistrationCommand creates secret-free user-scoped Claude JSON", () => {
   const command = buildRegistrationCommand(
     "claude",
     "/node",
@@ -72,19 +76,48 @@ test("buildRegistrationCommand creates user-scoped Claude configuration", () => 
     command: "claude",
     args: [
       "mcp",
-      "add",
-      "--transport",
-      "stdio",
+      "add-json",
       "--scope",
       "user",
-      "--env",
-      "SIPGATE_MCP_SCOPE=user",
-      "--env",
-      "SIPGATE_MCP_READONLY=0",
       "sipgate",
-      "--",
-      "/node",
-      "/sipgate-mcp/dist/index.js",
+      JSON.stringify({
+        type: "stdio",
+        command: "/node",
+        args: ["/sipgate-mcp/dist/index.js"],
+        env: {
+          SIPGATE_MCP_SCOPE: "user",
+          SIPGATE_MCP_READONLY: "0",
+        },
+      }),
     ],
   });
+});
+
+test("ensureStoredCredentials reuses an existing Keychain entry", () => {
+  let stores = 0;
+  let output = "";
+  ensureStoredCredentials(
+    false,
+    () => ({ tokenId: "stored-id", token: "stored-token" }),
+    () => { stores += 1; },
+    { write: (value) => {
+      output += String(value);
+      return true;
+    } },
+  );
+
+  assert.equal(stores, 0);
+  assert.match(output, /existing.*PAT-ID.*PAT/);
+});
+
+test("ensureStoredCredentials stores missing or explicitly replaced credentials", () => {
+  let stores = 0;
+  ensureStoredCredentials(false, () => undefined, () => { stores += 1; });
+  ensureStoredCredentials(
+    true,
+    () => ({ tokenId: "stored-id", token: "stored-token" }),
+    () => { stores += 1; },
+  );
+
+  assert.equal(stores, 2);
 });

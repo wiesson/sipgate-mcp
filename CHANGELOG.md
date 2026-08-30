@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 - 2026-08-30
+
+- Fix Claude Code registration by using its unambiguous `mcp add-json` command
+  instead of the variadic `--env` parser.
+- Clearly map macOS Keychain's generic `password data` prompts to sipgate's
+  PAT-ID and PAT labels.
+- Reuse existing Keychain credentials on repeated setup runs and add
+  `--replace-credentials` for deliberate rotation.
+
 ## 0.3.0 - 2026-08-30
 
 - Add `sipgate-mcp setup` for interactive PAT storage in macOS Keychain.

@@ -45,21 +45,28 @@ test("loadStoredCredentials hides Keychain lookup failures", () => {
 });
 
 test("storeCredentialsInteractively requests both values without receiving secrets", () => {
-  const accounts: string[] = [];
+  const entries: Array<{ account: string; label: string }> = [];
   let output = "";
   storeCredentialsInteractively(
     "darwin",
-    (account) => accounts.push(account),
+    (account, label) => entries.push({ account, label }),
     { write: (value) => {
       output += String(value);
       return true;
     } },
   );
 
-  assert.deepEqual(accounts, [
-    MACOS_KEYCHAIN_TOKEN_ID_ACCOUNT,
-    MACOS_KEYCHAIN_TOKEN_ACCOUNT,
+  assert.deepEqual(entries, [
+    {
+      account: MACOS_KEYCHAIN_TOKEN_ID_ACCOUNT,
+      label: "sipgate PAT-ID",
+    },
+    {
+      account: MACOS_KEYCHAIN_TOKEN_ACCOUNT,
+      label: "sipgate PAT",
+    },
   ]);
-  assert.match(output, /PAT token ID/);
-  assert.match(output, /PAT token/);
+  assert.match(output, /\[1\/2\] sipgate PAT-ID/);
+  assert.match(output, /password data/);
+  assert.match(output, /\[2\/2\] sipgate PAT/);
 });

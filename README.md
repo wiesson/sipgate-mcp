@@ -50,7 +50,13 @@ not run as a daemon and does not need to be started manually.
 Use `sipgate-mcp setup --client codex` or `--client claude` to configure only
 one client. Add `--allow-writes` only when agent-initiated account changes are
 deliberately wanted. `--dry-run` prints the secret-free registration commands
-without changing the Keychain or client configuration.
+without changing the Keychain or client configuration. Repeated setup runs
+reuse existing Keychain credentials; use `--replace-credentials` only to rotate
+the stored PAT-ID and PAT.
+
+During first setup, macOS calls both secure inputs `password data`. The setup
+labels the steps explicitly: enter the sipgate **PAT-ID** twice in step 1, then
+the sipgate **PAT** twice in step 2. Input remains hidden while typing.
 
 Secure interactive storage currently supports macOS. Environment variables
 remain available for Linux, Windows, containers, CI, and password-manager

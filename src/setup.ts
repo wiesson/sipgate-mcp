@@ -1,6 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
-import { storeCredentialsInteractively } from "./credentials.js";
+import {
+  loadStoredCredentials,
+  storeCredentialsInteractively,
+  type SipgateCredentials,
+} from "./credentials.js";
 
 export type SetupClient = "codex" | "claude";
 
@@ -8,6 +12,7 @@ export interface SetupOptions {
   allowWrites: boolean;
   clients: SetupClient[];
   dryRun: boolean;
+  replaceCredentials: boolean;
 }
 
 export interface ClientCommand {
@@ -21,6 +26,7 @@ export function parseSetupArgs(args: string[]): SetupOptions {
   const clients: SetupClient[] = [];
   let allowWrites = false;
   let dryRun = false;
+  let replaceCredentials = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
@@ -30,6 +36,10 @@ export function parseSetupArgs(args: string[]): SetupOptions {
     }
     if (argument === "--dry-run") {
       dryRun = true;
+      continue;
+    }
+    if (argument === "--replace-credentials") {
+      replaceCredentials = true;
       continue;
     }
     if (argument === "--client") {
@@ -50,6 +60,7 @@ export function parseSetupArgs(args: string[]): SetupOptions {
     allowWrites,
     clients: clients.length > 0 ? clients : ["codex", "claude"],
     dryRun,
+    replaceCredentials,
   };
 }
 
@@ -82,25 +93,41 @@ export function buildRegistrationCommand(
     };
   }
 
+  const configuration = {
+    type: "stdio",
+    command: nodeExecutable,
+    args: [entrypoint],
+    env: {
+      SIPGATE_MCP_SCOPE: "user",
+      SIPGATE_MCP_READONLY: allowWrites ? "0" : "1",
+    },
+  };
   return {
     command: "claude",
     args: [
       "mcp",
-      "add",
-      "--transport",
-      "stdio",
+      "add-json",
       "--scope",
       "user",
-      "--env",
-      modeEnvironment[0]!,
-      "--env",
-      modeEnvironment[1]!,
       "sipgate",
-      "--",
-      nodeExecutable,
-      entrypoint,
+      JSON.stringify(configuration),
     ],
   };
+}
+
+export function ensureStoredCredentials(
+  replaceCredentials: boolean,
+  loadCredentials: () => SipgateCredentials | undefined = loadStoredCredentials,
+  storeCredentials: () => void = storeCredentialsInteractively,
+  output: Pick<NodeJS.WriteStream, "write"> = process.stderr,
+): void {
+  if (!replaceCredentials && loadCredentials()) {
+    output.write(
+      "Using the existing sipgate PAT-ID and PAT from macOS Keychain.\n",
+    );
+    return;
+  }
+  storeCredentials();
 }
 
 function isCommandAvailable(command: string): boolean {
@@ -150,10 +177,10 @@ export function runSetup(
   }
 
   process.stderr.write(
-    "sipgate-mcp will store the PAT in macOS Keychain. Secret values are not written to MCP configuration or shell history.\n",
+    "sipgate-mcp stores the PAT-ID and PAT in macOS Keychain. Secret values are not written to MCP configuration or shell history.\n",
   );
   try {
-    storeCredentialsInteractively();
+    ensureStoredCredentials(options.replaceCredentials);
   } catch (error) {
     const message = error instanceof Error
       ? error.message
@@ -197,5 +224,6 @@ export const SETUP_HELP = `Usage:
 Setup options:
   --client codex|claude          Register only this client (repeatable)
   --allow-writes                 Register write tools; default is read-only
+  --replace-credentials          Replace an existing PAT-ID and PAT in Keychain
   --dry-run                      Print registration commands without changing anything
 `;

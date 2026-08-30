@@ -2,7 +2,7 @@
 name: sipgate-mcp
 description: Install and securely configure the sipgate MCP server when a user asks to set up or connect a sipgate account to Codex or Claude. Do not use for ordinary sipgate product questions.
 metadata:
-  version: "0.3.0"
+  version: "0.3.1"
 ---
 
 # Set up sipgate MCP
@@ -10,19 +10,19 @@ metadata:
 Install the matching CLI version with one available package manager:
 
 ```bash
-vp install -g sipgate-mcp@0.3.0
+vp install -g sipgate-mcp@0.3.1
 ```
 
 ```bash
-npm install -g sipgate-mcp@0.3.0
+npm install -g sipgate-mcp@0.3.1
 ```
 
 ```bash
-pnpm add -g sipgate-mcp@0.3.0
+pnpm add -g sipgate-mcp@0.3.1
 ```
 
 Run only one install command. Confirm that `sipgate-mcp --version` reports
-`0.3.0` before continuing.
+`0.3.1` before continuing.
 
 ## Security boundary
 
@@ -56,6 +56,10 @@ Omit `--client` only when both installed clients should be configured. The
 setup delegates PAT entry directly to macOS Keychain and registers a
 user-scoped, read-only stdio server. The client starts and stops that process;
 do not launch `sipgate-mcp` as a daemon.
+
+When credentials already exist in Keychain, setup reuses them without another
+prompt. Use `--replace-credentials` only when the user explicitly wants to
+rotate or replace the stored PAT-ID and PAT.
 
 If the Keychain prompt cannot be presented in the current environment, ask the
 user to run the setup command in their local interactive terminal. Do not ask
