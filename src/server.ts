@@ -41,7 +41,7 @@ export function createServer(
     {
       capabilities: { tools: {} },
       instructions: accessScope === "user"
-        ? `This sipgate MCP is restricted to the authenticated user's resources. ${readonly ? "It is read-only and cannot change the account." : "It may change that user's telephony settings or initiate chargeable actions when explicitly requested."} Never request or infer another user's ID.`
+        ? `This sipgate MCP is restricted to the authenticated user's resources. ${readonly ? "It is read-only and cannot change the account." : "It may change that user's telephony settings or initiate chargeable actions when explicitly requested. Account-wide contact, blacklist, porting-cancellation, and sipgate.io writes require an explicit confirmation argument."} Never request or infer another user's ID.`
         : `This sipgate MCP has account scope and the authenticated sipgate user was verified as an administrator. ${readonly ? "It is read-only and cannot change the account." : "It may change account-wide telephony settings or initiate chargeable actions when explicitly requested."}`,
     },
   );

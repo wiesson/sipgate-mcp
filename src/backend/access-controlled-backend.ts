@@ -6,6 +6,12 @@ import type {
   CallEmailNotificationInput,
   CallSmsNotificationInput,
   CallTransferInput,
+  ContactInput,
+  ContactQuery,
+  ContactScope,
+  ContactUpdateInput,
+  ContactsVcardQuery,
+  DeleteContactsInput,
   DeviceSettingsInput,
   DeviceType,
   FaxEmailNotificationInput,
@@ -13,6 +19,9 @@ import type {
   FaxSmsNotificationInput,
   ForwardingRule,
   GreetingUploadInput,
+  BulkHistoryEntryUpdateInput,
+  HistoryEntryUpdateInput,
+  HistoryExportQuery,
   HistoryQuery,
   JsonObject,
   JsonValue,
@@ -23,6 +32,8 @@ import type {
   QuickDialInput,
   ResendFaxInput,
   SendFaxInput,
+  SipgateIoSettingsInput,
+  StructuredVCardUpsertInput,
   SmsEmailNotificationInput,
   TelephonyBackend,
   VoicemailEmailNotificationInput,
@@ -386,6 +397,43 @@ export class AccessControlledBackend implements TelephonyBackend {
     return this.delegate.validateQuickDialNumber(quickDialNumber);
   }
 
+  public listContacts(query: ContactQuery): Promise<JsonValue> {
+    return this.delegate.listContacts(query);
+  }
+
+  public getContact(contactId: string): Promise<JsonValue> {
+    return this.delegate.getContact(contactId);
+  }
+
+  public listInternalContacts(): Promise<JsonValue> {
+    return this.delegate.listInternalContacts();
+  }
+
+  public exportContactsCsv(scopes: ContactScope[]): Promise<JsonValue> {
+    return this.delegate.exportContactsCsv(scopes);
+  }
+
+  public getContactsVcard(query: ContactsVcardQuery): Promise<JsonValue> {
+    return this.delegate.getContactsVcard(query);
+  }
+
+  public listIncomingBlacklist(): Promise<JsonValue> {
+    return this.delegate.listIncomingBlacklist();
+  }
+
+  public getCallRestrictions(userIds?: string[]): Promise<JsonValue> {
+    if (this.scope === "account") return this.delegate.getCallRestrictions(userIds);
+    if (userIds) {
+      for (const userId of userIds) this.assertUser(userId);
+    }
+    return this.delegate.getCallRestrictions([this.context.userId]);
+  }
+
+  public getRestrictions(userId: string, restrictions?: string[]): Promise<JsonValue> {
+    this.assertUser(userId);
+    return this.delegate.getRestrictions(userId, restrictions);
+  }
+
   public getRouting(userId?: string): Promise<JsonValue> {
     if (this.scope === "account") return this.delegate.getRouting(userId);
     this.assertUser(userId);
@@ -414,6 +462,26 @@ export class AccessControlledBackend implements TelephonyBackend {
       };
     }
     return this.delegate.getCallHistory({ ...query, connectionIds: scopedConnectionIds });
+  }
+
+  public async exportHistory(query: HistoryExportQuery): Promise<JsonValue> {
+    if (this.scope === "account") return this.delegate.exportHistory(query);
+    const connectionIds = await this.ownedConnectionIds();
+    const requested = query.connectionIds;
+    if (requested) {
+      for (const connectionId of requested) {
+        this.assertOwned(connectionIds, connectionId, "connection");
+      }
+    }
+    const scopedConnectionIds = requested ?? [...connectionIds];
+    if (scopedConnectionIds.length === 0) {
+      return {
+        content: "",
+        contentType: "text/csv",
+        note: "The authenticated user has no owned connections to export.",
+      };
+    }
+    return this.delegate.exportHistory({ ...query, connectionIds: scopedConnectionIds });
   }
 
   public async listCalls(): Promise<JsonValue> {
@@ -466,6 +534,175 @@ export class AccessControlledBackend implements TelephonyBackend {
     if (this.scope === "account") return this.delegate.getSettings(userId);
     this.assertUser(userId);
     return this.delegate.getSettings(this.context.userId);
+  }
+
+  public getBalance(): Promise<JsonValue> {
+    return this.delegate.getBalance();
+  }
+
+  public listPortings(): Promise<JsonValue> {
+    return this.delegate.listPortings();
+  }
+
+  public getPorting(portingId: number): Promise<JsonValue> {
+    return this.delegate.getPorting(portingId);
+  }
+
+  public getSipgateIoSettings(): Promise<JsonValue> {
+    return this.delegate.getSipgateIoSettings();
+  }
+
+  public listWebhookLogs(): Promise<JsonValue> {
+    return this.delegate.listWebhookLogs();
+  }
+
+  public createContact(
+    input: ContactInput,
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    this.assertAccountWideConfirmation(confirmAccountWide, "contact creation");
+    return this.delegate.createContact(input, confirmAccountWide);
+  }
+
+  public updateContact(
+    contactId: string,
+    input: ContactUpdateInput,
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    this.assertAccountWideConfirmation(confirmAccountWide, "contact update");
+    return this.delegate.updateContact(contactId, input, confirmAccountWide);
+  }
+
+  public deleteContact(
+    contactId: string,
+    scopes?: ContactScope[],
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    this.assertAccountWideConfirmation(confirmAccountWide, "contact deletion");
+    return this.delegate.deleteContact(contactId, scopes, confirmAccountWide);
+  }
+
+  public deleteContacts(
+    input: DeleteContactsInput,
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    this.assertAccountWideConfirmation(confirmAccountWide, "bulk contact deletion");
+    return this.delegate.deleteContacts(input, confirmAccountWide);
+  }
+
+  public importContactsCsv(
+    base64Content: string,
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    this.assertAccountWideConfirmation(confirmAccountWide, "CSV contact import");
+    return this.delegate.importContactsCsv(base64Content, confirmAccountWide);
+  }
+
+  public putContactsVcard(
+    scope: ContactScope,
+    data: StructuredVCardUpsertInput[],
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    this.assertAccountWideConfirmation(confirmAccountWide, "vCard contact update");
+    return this.delegate.putContactsVcard(scope, data, confirmAccountWide);
+  }
+
+  public addIncomingBlacklist(
+    phoneNumber: string,
+    isBlock?: boolean,
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    this.assertAccountWideConfirmation(confirmAccountWide, "incoming blacklist update");
+    return this.delegate.addIncomingBlacklist(phoneNumber, isBlock, confirmAccountWide);
+  }
+
+  public removeIncomingBlacklist(
+    phoneNumber: string,
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    this.assertAccountWideConfirmation(confirmAccountWide, "incoming blacklist deletion");
+    return this.delegate.removeIncomingBlacklist(phoneNumber, confirmAccountWide);
+  }
+
+  public setCallRestriction(restriction: string, enabled?: boolean): Promise<MutationResult> {
+    return this.delegate.setCallRestriction(restriction, enabled);
+  }
+
+  public async setHistoryRead(entryId: string, value?: boolean): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedHistoryEntry(entryId);
+    return this.delegate.setHistoryRead(entryId, value);
+  }
+
+  public async setHistoryNote(entryId: string, note: string): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedHistoryEntry(entryId);
+    return this.delegate.setHistoryNote(entryId, note);
+  }
+
+  public async setHistoryArchive(entryId: string, value?: boolean): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedHistoryEntry(entryId);
+    return this.delegate.setHistoryArchive(entryId, value);
+  }
+
+  public async updateHistoryEntry(
+    entryId: string,
+    input: HistoryEntryUpdateInput,
+  ): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedHistoryEntry(entryId);
+    return this.delegate.updateHistoryEntry(entryId, input);
+  }
+
+  public async deleteHistoryEntry(entryId: string): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedHistoryEntry(entryId);
+    return this.delegate.deleteHistoryEntry(entryId);
+  }
+
+  public async updateHistoryEntries(
+    inputs: BulkHistoryEntryUpdateInput[],
+  ): Promise<MutationResult> {
+    if (this.scope === "user") {
+      for (const input of inputs) await this.assertOwnedHistoryEntry(input.id);
+    }
+    return this.delegate.updateHistoryEntries(inputs);
+  }
+
+  public async deleteHistoryEntries(entryIds?: string[]): Promise<MutationResult> {
+    if (this.scope === "account") return this.delegate.deleteHistoryEntries(entryIds);
+    if (entryIds) {
+      for (const entryId of entryIds) await this.assertOwnedHistoryEntry(entryId);
+      return this.delegate.deleteHistoryEntries(entryIds);
+    }
+    const ownedEntryIds = await this.ownedHistoryEntryIds();
+    if (ownedEntryIds.length === 0) {
+      return {
+        before: [],
+        after: {
+          changed: false,
+          deleted: false,
+          note: "The authenticated user has no owned history entries to delete; no account-wide request was issued.",
+        },
+      };
+    }
+    return this.delegate.deleteHistoryEntries(ownedEntryIds);
+  }
+
+  public cancelPorting(
+    portingId: number,
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    if (confirmAccountWide !== true) {
+      throw new AccessPolicyError(
+        "Cancelling a number porting requires confirm_account_wide: true.",
+      );
+    }
+    return this.delegate.cancelPorting(portingId, confirmAccountWide);
+  }
+
+  public updateSipgateIoSettings(
+    input: SipgateIoSettingsInput,
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    this.assertAccountWideConfirmation(confirmAccountWide, "sipgate.io account settings update");
+    return this.delegate.updateSipgateIoSettings(input, confirmAccountWide);
   }
 
   public async setNumberRouting(numberId: string, endpointId: string): Promise<MutationResult> {
@@ -1163,6 +1400,48 @@ export class AccessControlledBackend implements TelephonyBackend {
     throw new AccessPolicyError(
       "User scope does not permit access to the requested history entry.",
     );
+  }
+
+  private assertAccountWideConfirmation(
+    confirmAccountWide: boolean | undefined,
+    operation: string,
+  ): void {
+    if (this.scope === "account" || confirmAccountWide === true) return;
+    throw new AccessPolicyError(
+      `User scope requires confirm_account_wide: true for this account-wide ${operation}.`,
+    );
+  }
+
+  private async ownedHistoryEntryIds(): Promise<string[]> {
+    try {
+      const connectionIds = [...await this.ownedConnectionIds()];
+      if (connectionIds.length === 0) return [];
+      const found = new Set<string>();
+      const pageSize = 1000;
+      for (const archived of [false, true]) {
+        for (let offset = 0; ; offset += pageSize) {
+          const response = await this.delegate.getCallHistory({
+            archived,
+            connectionIds,
+            limit: pageSize,
+            offset,
+            types: ["CALL", "VOICEMAIL", "SMS", "FAX"],
+          });
+          const page = items(response);
+          for (const entry of page) {
+            const entryId = stringField(entry, "id");
+            if (entryId) found.add(entryId);
+          }
+          if (page.length < pageSize) break;
+        }
+      }
+      return [...found];
+    } catch (error) {
+      if (error instanceof AccessPolicyError) throw error;
+      throw new AccessPolicyError(
+        "User scope could not enumerate owned history entries for bulk deletion.",
+      );
+    }
   }
 
   private assertUser(userId: string | undefined): void {

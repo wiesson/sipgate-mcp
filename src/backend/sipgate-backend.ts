@@ -6,6 +6,12 @@ import type {
   CallEmailNotificationInput,
   CallSmsNotificationInput,
   CallTransferInput,
+  ContactInput,
+  ContactQuery,
+  ContactScope,
+  ContactUpdateInput,
+  ContactsVcardQuery,
+  DeleteContactsInput,
   DeviceSettingsInput,
   DeviceType,
   FaxEmailNotificationInput,
@@ -13,6 +19,9 @@ import type {
   FaxSmsNotificationInput,
   ForwardingRule,
   GreetingUploadInput,
+  BulkHistoryEntryUpdateInput,
+  HistoryEntryUpdateInput,
+  HistoryExportQuery,
   HistoryQuery,
   JsonObject,
   JsonValue,
@@ -23,6 +32,8 @@ import type {
   QuickDialInput,
   ResendFaxInput,
   SendFaxInput,
+  SipgateIoSettingsInput,
+  StructuredVCardUpsertInput,
   SmsEmailNotificationInput,
   TelephonyBackend,
   VoicemailEmailNotificationInput,
@@ -102,6 +113,26 @@ function phonelineMutationUnavailable(status?: number): MutationResult {
       phonelinesAvailable: false,
       ...(status === undefined ? {} : { httpStatus: status }),
       note: `${unavailableNote(status, "the phoneline feature")} No change was attempted.`,
+    },
+  };
+}
+
+function unavailableFeature(subject: string, status?: number, items = false): JsonObject {
+  return {
+    ...(items ? { items: [] } : {}),
+    available: false,
+    ...(status === undefined ? {} : { httpStatus: status }),
+    note: unavailableNote(status, subject),
+  };
+}
+
+function unavailableFeatureMutation(subject: string, status?: number): MutationResult {
+  return {
+    before: null,
+    after: {
+      changed: false,
+      ...unavailableFeature(subject, status),
+      note: `${unavailableNote(status, subject)} No change was attempted.`,
     },
   };
 }
@@ -450,6 +481,72 @@ export class SipgateBackend implements TelephonyBackend {
     return sanitize(response ?? {});
   }
 
+  public async listContacts(query: ContactQuery): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/contacts", {
+      query: {
+        phonenumbers: query.phoneNumbers,
+        limit: query.limit,
+        offset: query.offset,
+        lastId: query.lastId,
+        scopes: query.scopes,
+      },
+    });
+    return sanitize(response ?? { items: [], totalCount: 0 });
+  }
+
+  public async getContact(contactId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(`/contacts/${encodeId(contactId)}`);
+    return sanitize(response ?? {});
+  }
+
+  public async listInternalContacts(): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/contacts/internal");
+    return sanitize(response ?? { items: [] });
+  }
+
+  public async exportContactsCsv(scopes: ContactScope[]): Promise<JsonValue> {
+    const content = await this.client.requestText("/contacts/csv", {
+      query: { scope: scopes },
+      accept: "text/csv",
+    });
+    return { content, contentType: "text/csv" };
+  }
+
+  public async getContactsVcard(query: ContactsVcardQuery): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/contacts/vcard", {
+      query: {
+        scope: query.scopes,
+        labels: query.labels,
+        contactIds: query.contactIds,
+        wantedFields: query.wantedFields,
+        filter: query.filter,
+        limit: query.limit,
+        offset: query.offset,
+        lastId: query.lastId,
+      },
+    });
+    return sanitize(response ?? { contacts: [], overallMatches: 0 });
+  }
+
+  public async listIncomingBlacklist(): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/blacklist/incoming");
+    return sanitize(response ?? { items: [] });
+  }
+
+  public async getCallRestrictions(userIds?: string[]): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/callrestrictions", {
+      query: { userIds },
+    });
+    return sanitize(response ?? {});
+  }
+
+  public async getRestrictions(userId: string, restrictions?: string[]): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/restrictions", {
+      query: { userId, restriction: restrictions },
+    });
+    return sanitize(response ?? { items: [] });
+  }
+
   public async getRouting(userId?: string): Promise<JsonValue> {
     const [numbersResponse, usersResponse] = await Promise.all([
       userId
@@ -514,6 +611,8 @@ export class SipgateBackend implements TelephonyBackend {
         from: query.from,
         to: query.to,
         phonenumber: query.phoneNumber,
+        archived: query.archived,
+        starred: query.starred,
       },
     });
     const object = response && !Array.isArray(response) && typeof response === "object" ? response : {};
@@ -524,6 +623,24 @@ export class SipgateBackend implements TelephonyBackend {
       items,
       pagination: { offset: query.offset, limit: query.limit, totalCount, nextOffset },
     });
+  }
+
+  public async exportHistory(query: HistoryExportQuery): Promise<JsonValue> {
+    const content = await this.client.requestText("/history/export", {
+      query: {
+        connectionIds: query.connectionIds,
+        types: query.types,
+        directions: query.directions,
+        offset: query.offset,
+        limit: query.limit,
+        archived: query.archived,
+        starred: query.starred,
+        from: query.from,
+        to: query.to,
+      },
+      accept: "application/octet-stream",
+    });
+    return { content, contentType: "text/csv" };
   }
 
   public async listCalls(): Promise<JsonValue> {
@@ -588,6 +705,375 @@ export class SipgateBackend implements TelephonyBackend {
       };
     }));
     return sanitize({ users: settings.filter((item) => item !== null) });
+  }
+
+  public async getBalance(): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/balance");
+    return sanitize(response ?? {});
+  }
+
+  public async listPortings(): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/portings");
+    return sanitize(response ?? { items: [] });
+  }
+
+  public async getPorting(portingId: number): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(`/portings/${portingId}`);
+    return sanitize(response ?? {});
+  }
+
+  public async getSipgateIoSettings(): Promise<JsonValue> {
+    const { value, available, status } = await optional(
+      this.client.request<JsonValue>("/settings/sipgateio"),
+    );
+    return available
+      ? sanitize(value ?? {})
+      : unavailableFeature("the account-wide sipgate.io settings feature", status);
+  }
+
+  public async listWebhookLogs(): Promise<JsonValue> {
+    const { value, available, status } = await optional(
+      this.client.request<JsonValue>("/log/webhooks"),
+    );
+    return available
+      ? sanitize(value ?? { items: [] })
+      : unavailableFeature("the account-wide sipgate.io webhook log", status, true);
+  }
+
+  public async createContact(
+    input: ContactInput,
+    _confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    const response = await this.client.request<JsonValue>("/contacts", {
+      method: "POST",
+      body: this.contactBody(input),
+    });
+    return {
+      before: null,
+      after: sanitize({
+        created: true,
+        response: response ?? null,
+        note: "sipgate does not return the created contact ID, so no exact post-create read-back is possible.",
+      }),
+    };
+  }
+
+  public async updateContact(
+    contactId: string,
+    input: ContactUpdateInput,
+    _confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    const path = `/contacts/${encodeId(contactId)}`;
+    const before = await this.client.request<JsonValue>(path);
+    await this.client.request<JsonValue>(path, {
+      method: "PUT",
+      body: this.contactBody(input),
+    });
+    const after = await this.client.request<JsonValue>(path);
+    return { before: sanitize(before ?? {}), after: sanitize(after ?? {}) };
+  }
+
+  public async deleteContact(
+    contactId: string,
+    scopes?: ContactScope[],
+    _confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    const before = await this.client.request<JsonValue>(`/contacts/${encodeId(contactId)}`);
+    const response = await this.client.request<JsonValue>(
+      `/contacts/${encodeId(contactId)}`,
+      { method: "DELETE", query: { scope: scopes } },
+    );
+    return {
+      before: sanitize(before ?? {}),
+      after: sanitize({
+        deleted: true,
+        response: response ?? null,
+        note: "sipgate exposes no read-back for a deleted contact.",
+      }),
+    };
+  }
+
+  public async deleteContacts(
+    input: DeleteContactsInput,
+    _confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    const before = input.contactIds && input.contactIds.length > 0
+      ? await this.readContacts(input.contactIds)
+      : input.source === undefined
+        ? await this.listAllContacts(input.scope?.flatMap((scope) =>
+          scope === "PRIVATE,SHARED" ? ["PRIVATE", "SHARED"] : [scope]))
+        : null;
+    const response = await this.client.request<JsonValue>("/contacts", {
+      method: "DELETE",
+      body: {
+        ...(input.contactIds === undefined ? {} : { contactIds: input.contactIds }),
+        ...(input.scope === undefined ? {} : { scope: input.scope }),
+        ...(input.source === undefined ? {} : { source: input.source }),
+      },
+    });
+    return {
+      before: sanitize(before),
+      after: sanitize({
+        deleted: true,
+        response: response ?? null,
+        note: input.source !== undefined && !input.contactIds
+          ? "sipgate's contact read endpoint has no source filter, so before is null for a source-selected delete; deleted contacts have no read-back."
+          : "sipgate exposes no read-back for contacts removed by the bulk-delete endpoint.",
+      }),
+    };
+  }
+
+  public async importContactsCsv(
+    base64Content: string,
+    _confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    const before = await this.listAllContacts();
+    await this.client.request<JsonValue>("/contacts/import/csv", {
+      method: "POST",
+      body: { base64Content },
+    });
+    const after = await this.listAllContacts();
+    return { before, after };
+  }
+
+  public async putContactsVcard(
+    scope: ContactScope,
+    data: StructuredVCardUpsertInput[],
+    _confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    const contactIds = data
+      .map((entry) => entry.contactId)
+      .filter((contactId): contactId is string => Boolean(contactId));
+    const beforeQuery: ContactsVcardQuery = {
+      scopes: [scope],
+      ...(contactIds.length === 0 ? {} : { contactIds }),
+    };
+    const before = contactIds.length === 0 ? null : await this.getContactsVcard(beforeQuery);
+    const response = await this.client.request<JsonValue>("/contacts/vcard", {
+      method: "PUT",
+      query: { scope },
+      body: { data: sanitize(data) },
+    });
+    const responseObject = response && !Array.isArray(response) && typeof response === "object"
+      ? response
+      : {};
+    const resultItems = Array.isArray(responseObject.result)
+      ? responseObject.result.filter((item): item is JsonObject =>
+        Boolean(item) && !Array.isArray(item) && typeof item === "object")
+      : [];
+    const resultIds = resultItems
+      .map((entry) => stringField(entry, "contactId"))
+      .filter((contactId): contactId is string => Boolean(contactId));
+    const readbackIds = [...new Set([...contactIds, ...resultIds])];
+    const after = await this.getContactsVcard({
+      scopes: [scope],
+      ...(readbackIds.length === 0 ? {} : { contactIds: readbackIds }),
+    });
+    return {
+      before,
+      after: sanitize({
+        contacts: after,
+        response: response ?? null,
+        ...(contactIds.length === data.length ? {} : {
+          note: "New vCards had no before-state; sipgate's result IDs were used for post-write read-back when available.",
+        }),
+      }),
+    };
+  }
+
+  public async addIncomingBlacklist(
+    phoneNumber: string,
+    isBlock?: boolean,
+    _confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    const before = await this.listIncomingBlacklist();
+    await this.client.request<JsonValue>("/blacklist/incoming", {
+      method: "POST",
+      body: { phoneNumber, ...(isBlock === undefined ? {} : { isBlock }) },
+    });
+    const after = await this.listIncomingBlacklist();
+    return { before, after };
+  }
+
+  public async removeIncomingBlacklist(
+    phoneNumber: string,
+    _confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    const entries = asItems(await this.listIncomingBlacklist());
+    const normalized = phoneNumber.startsWith("+") ? phoneNumber : `+${phoneNumber}`;
+    const before = entries.find((entry) => stringField(entry, "phoneNumber") === normalized) ?? null;
+    const response = await this.client.request<JsonValue>(
+      `/blacklist/incoming/${encodeId(phoneNumber)}`,
+      { method: "DELETE" },
+    );
+    return {
+      before: sanitize(before),
+      after: sanitize({
+        deleted: true,
+        response: response ?? null,
+        note: "sipgate exposes no read-back for a deleted incoming blacklist entry.",
+      }),
+    };
+  }
+
+  public async setCallRestriction(
+    restriction: string,
+    enabled?: boolean,
+  ): Promise<MutationResult> {
+    const { userId } = await this.getAuthenticatedUser();
+    const before = await this.getCallRestrictions([userId]);
+    await this.client.request<JsonValue>(
+      `/${encodeId(userId)}/callrestrictions/${encodeId(restriction)}`,
+      {
+        method: "POST",
+        body: { ...(enabled === undefined ? {} : { enabled }) },
+      },
+    );
+    const after = await this.getCallRestrictions([userId]);
+    return { before, after };
+  }
+
+  public setHistoryRead(entryId: string, value?: boolean): Promise<MutationResult> {
+    return this.mutateHistoryWithReadback(
+      entryId,
+      `/history/${encodeId(entryId)}/read`,
+      { ...(value === undefined ? {} : { value }) },
+    );
+  }
+
+  public setHistoryNote(entryId: string, note: string): Promise<MutationResult> {
+    return this.mutateHistoryWithReadback(
+      entryId,
+      `/history/${encodeId(entryId)}/note`,
+      { note },
+    );
+  }
+
+  public setHistoryArchive(entryId: string, value?: boolean): Promise<MutationResult> {
+    return this.mutateHistoryWithReadback(
+      entryId,
+      `/history/${encodeId(entryId)}/archive`,
+      { ...(value === undefined ? {} : { value }) },
+    );
+  }
+
+  public updateHistoryEntry(
+    entryId: string,
+    input: HistoryEntryUpdateInput,
+  ): Promise<MutationResult> {
+    return this.mutateHistoryWithReadback(
+      entryId,
+      `/history/${encodeId(entryId)}`,
+      {
+        ...(input.archived === undefined ? {} : { archived: input.archived }),
+        ...(input.note === undefined ? {} : { note: input.note }),
+        ...(input.read === undefined ? {} : { read: input.read }),
+        ...(input.starred === undefined ? {} : { starred: input.starred }),
+      },
+    );
+  }
+
+  public async deleteHistoryEntry(entryId: string): Promise<MutationResult> {
+    const before = await this.client.request<JsonValue>(`/history/${encodeId(entryId)}`);
+    const response = await this.client.request<JsonValue>(`/history/${encodeId(entryId)}`, {
+      method: "DELETE",
+    });
+    return {
+      before: sanitize(before ?? {}),
+      after: sanitize({
+        deleted: true,
+        response: response ?? null,
+        note: "History deletion is permanent; sipgate exposes no deleted-entry read-back.",
+      }),
+    };
+  }
+
+  public async updateHistoryEntries(
+    inputs: BulkHistoryEntryUpdateInput[],
+  ): Promise<MutationResult> {
+    const before = await this.readHistoryEntries(inputs.map((input) => input.id));
+    await this.client.request<JsonValue>("/history", {
+      method: "PUT",
+      body: inputs.map((input) => ({
+        id: input.id,
+        ...(input.archived === undefined ? {} : { archived: input.archived }),
+        ...(input.read === undefined ? {} : { read: input.read }),
+        ...(input.starred === undefined ? {} : { starred: input.starred }),
+      })),
+    });
+    const after = await this.readHistoryEntries(inputs.map((input) => input.id));
+    return { before: sanitize(before), after: sanitize(after) };
+  }
+
+  public async deleteHistoryEntries(entryIds?: string[]): Promise<MutationResult> {
+    const before = entryIds === undefined
+      ? await this.listAllHistoryEntries()
+      : await this.readHistoryEntries(entryIds);
+    const response = await this.client.request<JsonValue>("/history", {
+      method: "DELETE",
+      query: { id: entryIds },
+    });
+    return {
+      before: sanitize(before),
+      after: sanitize({
+        deleted: true,
+        entryIds: entryIds ?? null,
+        response: response ?? null,
+        note: "History deletion is permanent; sipgate exposes no deleted-entry read-back.",
+      }),
+    };
+  }
+
+  public async cancelPorting(
+    portingId: number,
+    _confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    const before = await this.getPorting(portingId);
+    const response = await this.client.request<JsonValue>(`/portings/${portingId}`, {
+      method: "DELETE",
+    });
+    return {
+      before,
+      after: sanitize({
+        cancelled: true,
+        response: response ?? null,
+        note: "Cancelling a number porting is irreversible through the sipgate v2 API.",
+      }),
+    };
+  }
+
+  public async updateSipgateIoSettings(
+    input: SipgateIoSettingsInput,
+    _confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    const before = await optional(this.client.request<JsonValue>("/settings/sipgateio"));
+    if (!before.available) {
+      return unavailableFeatureMutation(
+        "the account-wide sipgate.io settings feature",
+        before.status,
+      );
+    }
+    await this.client.request<JsonValue>("/settings/sipgateio", {
+      method: "PUT",
+      body: {
+        incomingUrl: input.incomingUrl,
+        outgoingUrl: input.outgoingUrl,
+        ...(input.log === undefined ? {} : { log: input.log }),
+        ...(input.pushApiVersion === undefined ? {} : { pushApiVersion: input.pushApiVersion }),
+        ...(input.whitelist === undefined ? {} : { whitelist: input.whitelist }),
+      },
+    });
+    const after = await optional(this.client.request<JsonValue>("/settings/sipgateio"));
+    return {
+      before: sanitize(before.value ?? {}),
+      after: after.available
+        ? sanitize(after.value ?? {})
+        : {
+          ...unavailableFeature("the account-wide sipgate.io settings feature", after.status),
+          changed: true,
+          note: "The change was accepted, but sipgate denied the settings read-back.",
+        },
+    };
   }
 
   public async setNumberRouting(numberId: string, endpointId: string): Promise<MutationResult> {
@@ -1735,6 +2221,85 @@ export class SipgateBackend implements TelephonyBackend {
     );
     const after = await this.findFaxline(userId, faxlineId);
     return { before: sanitize(before), after: sanitize(after) };
+  }
+
+  private contactBody(input: ContactInput): JsonObject {
+    return {
+      ...(input.addresses === undefined ? {} : { addresses: sanitize(input.addresses) }),
+      ...(input.emails === undefined ? {} : { emails: sanitize(input.emails) }),
+      ...(input.family === undefined ? {} : { family: input.family }),
+      ...(input.given === undefined ? {} : { given: input.given }),
+      ...("id" in input && typeof input.id === "string" ? { id: input.id } : {}),
+      ...(input.name === undefined ? {} : { name: input.name }),
+      ...(input.note === undefined ? {} : { note: input.note }),
+      ...(input.numbers === undefined ? {} : { numbers: sanitize(input.numbers) }),
+      ...(input.organization === undefined ? {} : { organization: input.organization }),
+      ...(input.picture === undefined ? {} : { picture: input.picture }),
+      ...(input.scope === undefined ? {} : { scope: input.scope }),
+      ...(input.websites === undefined ? {} : { websites: sanitize(input.websites) }),
+    };
+  }
+
+  private async readContacts(contactIds: string[]): Promise<JsonValue[]> {
+    const contacts: JsonValue[] = [];
+    for (const contactId of contactIds) contacts.push(await this.getContact(contactId));
+    return contacts;
+  }
+
+  private async listAllContacts(scopes?: ContactScope[]): Promise<JsonValue> {
+    const all: JsonObject[] = [];
+    const limit = 5000;
+    let lastId: string | undefined;
+    for (;;) {
+      const response = await this.listContacts({
+        limit,
+        ...(lastId === undefined ? {} : { lastId }),
+        ...(scopes === undefined ? {} : { scopes }),
+      });
+      const page = asItems(response);
+      all.push(...page);
+      if (page.length < limit) break;
+      const nextLastId = stringField(page[page.length - 1] ?? {}, "id");
+      if (!nextLastId || nextLastId === lastId) break;
+      lastId = nextLastId;
+    }
+    return sanitize({ items: all, totalCount: all.length });
+  }
+
+  private async readHistoryEntries(entryIds: string[]): Promise<JsonValue[]> {
+    const entries: JsonValue[] = [];
+    for (const entryId of entryIds) entries.push(await this.getHistoryEntry(entryId));
+    return entries;
+  }
+
+  private async listAllHistoryEntries(): Promise<JsonValue[]> {
+    const all: JsonValue[] = [];
+    const pageSize = 1000;
+    for (const archived of [false, true]) {
+      for (let offset = 0; ; offset += pageSize) {
+        const response = await this.getCallHistory({
+          archived,
+          offset,
+          limit: pageSize,
+          types: ["CALL", "VOICEMAIL", "SMS", "FAX"],
+        });
+        const page = asItems(response);
+        all.push(...page);
+        if (page.length < pageSize) break;
+      }
+    }
+    return all;
+  }
+
+  private async mutateHistoryWithReadback(
+    entryId: string,
+    path: string,
+    body: JsonObject,
+  ): Promise<MutationResult> {
+    const before = await this.client.request<JsonValue>(`/history/${encodeId(entryId)}`);
+    await this.client.request<JsonValue>(path, { method: "PUT", body });
+    const after = await this.client.request<JsonValue>(`/history/${encodeId(entryId)}`);
+    return { before: sanitize(before ?? {}), after: sanitize(after ?? {}) };
   }
 
   private async createDevice(path: string, body: JsonObject): Promise<MutationResult> {

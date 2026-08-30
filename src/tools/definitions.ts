@@ -47,6 +47,77 @@ const dialString = z.string().trim().min(3).regex(
   "Use a phone number, for example +4915799912345 or 0211 1234567",
 );
 const isoDateTime = z.string().refine((value) => !Number.isNaN(Date.parse(value)), "Use an ISO 8601 date-time");
+const contactScope = z.enum(["PRIVATE", "SHARED", "INTERNAL"]);
+const contactWriteScope = z.enum(["PRIVATE", "SHARED", "INTERNAL", "PRIVATE,SHARED"]);
+const contactAddress = z.object({
+  country: swaggerString.optional(),
+  extendedAddress: swaggerString.optional(),
+  locality: swaggerString.optional(),
+  poBox: swaggerString.optional(),
+  postalCode: swaggerString.optional(),
+  region: swaggerString.optional(),
+  streetAddress: swaggerString.optional(),
+  type: z.array(swaggerString).optional(),
+});
+const contactEmail = z.object({
+  email: swaggerString.optional(),
+  type: z.array(swaggerString).optional(),
+});
+const contactNumber = z.object({
+  number: swaggerString.optional(),
+  type: z.array(swaggerString).optional(),
+});
+const contactWebsite = z.object({
+  type: z.array(swaggerString).optional(),
+  url: swaggerString.optional(),
+});
+const contactInput = z.object({
+  addresses: z.array(contactAddress).optional(),
+  emails: z.array(contactEmail).optional(),
+  family: swaggerString.optional(),
+  given: swaggerString.optional(),
+  name: swaggerString.optional(),
+  note: swaggerString.optional(),
+  numbers: z.array(contactNumber).optional(),
+  organization: z.array(z.array(swaggerString)).optional(),
+  picture: swaggerString.optional(),
+  scope: contactWriteScope.optional(),
+  websites: z.array(contactWebsite).optional(),
+});
+const contactUpdateInput = contactInput.extend({ id: swaggerString.optional() });
+const structuredVCardItem = z.object({
+  city: swaggerString.optional(),
+  country: swaggerString.optional(),
+  extended: swaggerString.optional(),
+  family: swaggerString.optional(),
+  given: swaggerString.optional(),
+  group: swaggerString.optional(),
+  lat: swaggerString.optional(),
+  long: swaggerString.optional(),
+  middle: swaggerString.optional(),
+  name: swaggerString.optional(),
+  po_box: swaggerString.optional(),
+  post_code: swaggerString.optional(),
+  prefixes: swaggerString.optional(),
+  region: swaggerString.optional(),
+  street: swaggerString.optional(),
+  suffixes: swaggerString.optional(),
+  types: z.array(swaggerString).optional(),
+  unit: z.array(swaggerString).optional(),
+  value: swaggerString.optional(),
+  "x-local-number": swaggerString.optional(),
+  xlocalNumber: swaggerString.optional(),
+});
+const structuredVCardUpsert = z.object({
+  contactId: swaggerString.optional(),
+  item: z.record(z.string(), z.array(structuredVCardItem)).optional(),
+});
+const historyTypes = z.array(z.enum(["CALL", "VOICEMAIL", "SMS", "FAX"])).min(1).optional();
+const historyDirections = z.array(
+  z.enum(["INCOMING", "OUTGOING", "MISSED_INCOMING", "MISSED_OUTGOING"]),
+).min(1).optional();
+const historyStarred = z.array(z.enum(["STARRED", "UNSTARRED"])).min(1).optional();
+const callRestriction = id.describe("Call restriction name, for example roaming");
 
 function define<T extends z.ZodType<Record<string, unknown>>>(options: {
   name: string;
@@ -73,6 +144,10 @@ export function createToolDefinitions(
   const changeWarning = userScoped
     ? "CHANGES THE AUTHENTICATED USER'S SIPGATE ACCOUNT AND MAY INCUR CHARGES:"
     : "CHANGES THE SIPGATE ACCOUNT AND MAY INCUR CHARGES:";
+  const accountWideConfirmation = userScoped
+    ? z.literal(true).describe("Required acknowledgement that this write affects the whole sipgate account")
+    : z.boolean().optional().describe("Optional acknowledgement that this write affects the whole sipgate account");
+  const accountWideWriteWarning = `${changeWarning} this operation changes an account-wide sipgate resource shared by all users.`;
   const readTools = [
     define({
       name: "account_info",
@@ -414,11 +489,380 @@ export function createToolDefinitions(
       annotations: readAnnotations,
       execute: async ({ user_id }) => backend.getSettings(user_id),
     }),
+    define({
+      name: "list_contacts",
+      description: "List contacts from the account-wide sipgate address book. User scope permits this account-wide read.",
+      schema: z.object({
+        phone_numbers: z.array(swaggerString).min(1).optional(),
+        limit: z.int().min(1).default(5000),
+        offset: z.int().min(0).optional().describe("Deprecated by sipgate; prefer last_id"),
+        last_id: id.optional().describe("Last contact ID from the previous page"),
+        scopes: z.array(contactScope).min(1).optional(),
+      }),
+      annotations: readAnnotations,
+      execute: async ({ phone_numbers, limit, offset, last_id, scopes }) => backend.listContacts({
+        limit,
+        ...(phone_numbers === undefined ? {} : { phoneNumbers: phone_numbers }),
+        ...(offset === undefined ? {} : { offset }),
+        ...(last_id === undefined ? {} : { lastId: last_id }),
+        ...(scopes === undefined ? {} : { scopes }),
+      }),
+    }),
+    define({
+      name: "get_contact",
+      description: "Get one contact from the account-wide sipgate address book. User scope permits this account-wide read.",
+      schema: z.object({ contact_id: id }),
+      annotations: readAnnotations,
+      execute: async ({ contact_id }) => backend.getContact(contact_id),
+    }),
+    define({
+      name: "list_internal_contacts",
+      description: "List account-wide internal sipgate contacts through the deprecated compatibility endpoint. Prefer list_contacts with scopes=[INTERNAL]. User scope permits this read.",
+      schema: z.object({}),
+      annotations: readAnnotations,
+      execute: async () => backend.listInternalContacts(),
+    }),
+    define({
+      name: "export_contacts_csv",
+      description: "Export account-wide contacts as CSV text for the requested scopes. User scope permits this account-wide read.",
+      schema: z.object({ scopes: z.array(contactScope).min(1) }),
+      annotations: readAnnotations,
+      execute: async ({ scopes }) => backend.exportContactsCsv(scopes),
+    }),
+    define({
+      name: "get_contacts_vcard",
+      description: "Get structured vCards from the account-wide sipgate address book. User scope permits this account-wide read.",
+      schema: z.object({
+        scopes: z.array(contactScope).min(1),
+        labels: z.array(swaggerString).min(1).optional(),
+        contact_ids: z.array(id).min(1).optional(),
+        wanted_fields: z.array(swaggerString).min(1).optional(),
+        filter: swaggerString.optional(),
+        limit: z.int().min(1).default(5000),
+        offset: z.int().min(0).optional().describe("Deprecated by sipgate; prefer last_id"),
+        last_id: id.optional(),
+      }),
+      annotations: readAnnotations,
+      execute: async ({ scopes, labels, contact_ids, wanted_fields, filter, limit, offset, last_id }) =>
+        backend.getContactsVcard({
+          scopes,
+          limit,
+          ...(labels === undefined ? {} : { labels }),
+          ...(contact_ids === undefined ? {} : { contactIds: contact_ids }),
+          ...(wanted_fields === undefined ? {} : { wantedFields: wanted_fields }),
+          ...(filter === undefined ? {} : { filter }),
+          ...(offset === undefined ? {} : { offset }),
+          ...(last_id === undefined ? {} : { lastId: last_id }),
+        }),
+    }),
+    define({
+      name: "list_incoming_blacklist",
+      description: "List the account-wide incoming-call blacklist. User scope permits this account-wide read.",
+      schema: z.object({}),
+      annotations: readAnnotations,
+      execute: async () => backend.listIncomingBlacklist(),
+    }),
+    define({
+      name: "list_call_restrictions",
+      description: userScoped
+        ? "Get call restrictions for the authenticated sipgate user; another user's ID is rejected."
+        : "Get call restrictions for selected users or the whole account.",
+      schema: z.object({
+        user_ids: z.array(id).min(1).optional(),
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_ids }) => backend.getCallRestrictions(user_ids),
+    }),
+    define({
+      name: "list_restrictions",
+      description: "List product/action restrictions for one sipgate user. User scope only permits the authenticated user ID.",
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "sipgate user ID"),
+        restrictions: z.array(swaggerString).min(1).optional(),
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_id, restrictions }) => backend.getRestrictions(user_id, restrictions),
+    }),
+    define({
+      name: "export_history",
+      description: userScoped
+        ? "Export only the authenticated user's history as CSV text, constrained to owned connection IDs."
+        : "Export account-wide history as CSV text with optional filters.",
+      schema: z.object({
+        connection_ids: z.array(id).min(1).optional(),
+        types: historyTypes,
+        directions: historyDirections,
+        offset: z.int().min(0).default(0),
+        limit: z.int().min(0).max(1000).default(1000),
+        archived: z.boolean().optional(),
+        starred: historyStarred,
+        from: isoDateTime.optional(),
+        to: isoDateTime.optional(),
+      }).refine((value) => !value.from || !value.to || Date.parse(value.from) <= Date.parse(value.to), {
+        message: "from must be before or equal to to",
+        path: ["from"],
+      }),
+      annotations: readAnnotations,
+      execute: async ({ connection_ids, types, directions, offset, limit, archived, starred, from, to }) =>
+        backend.exportHistory({
+          offset,
+          limit,
+          ...(connection_ids === undefined ? {} : { connectionIds: connection_ids }),
+          ...(types === undefined ? {} : { types }),
+          ...(directions === undefined ? {} : { directions }),
+          ...(archived === undefined ? {} : { archived }),
+          ...(starred === undefined ? {} : { starred }),
+          ...(from === undefined ? {} : { from }),
+          ...(to === undefined ? {} : { to }),
+        }),
+    }),
+    define({
+      name: "get_balance",
+      description: "Get the account-wide sipgate balance. User scope permits this account-wide read; the amount is returned in ten-thousandths of the currency unit.",
+      schema: z.object({}),
+      annotations: readAnnotations,
+      execute: async () => backend.getBalance(),
+    }),
+    define({
+      name: "list_portings",
+      description: "List all account-wide phone-number portings. User scope permits this account-wide read.",
+      schema: z.object({}),
+      annotations: readAnnotations,
+      execute: async () => backend.listPortings(),
+    }),
+    define({
+      name: "get_porting",
+      description: "Get one account-wide phone-number porting. User scope permits this account-wide read.",
+      schema: z.object({ porting_id: int32Id }),
+      annotations: readAnnotations,
+      execute: async ({ porting_id }) => backend.getPorting(porting_id),
+    }),
+    define({
+      name: "get_sipgateio_settings",
+      description: "Get the account-wide sipgate.io webhook URLs and logging configuration. User scope permits this account-wide read; unavailable plans return a clear feature-absent result.",
+      schema: z.object({}),
+      annotations: readAnnotations,
+      execute: async () => backend.getSipgateIoSettings(),
+    }),
+    define({
+      name: "list_webhook_logs",
+      description: "List the account-wide sipgate.io webhook log. User scope permits this account-wide read; unavailable plans return a clear feature-absent result.",
+      schema: z.object({}),
+      annotations: readAnnotations,
+      execute: async () => backend.listWebhookLogs(),
+    }),
   ];
 
   if (readonly) return readTools;
 
   const writeTools = [
+    define({
+      name: "create_contact",
+      description: `${accountWideWriteWarning} In user scope, confirm_account_wide=true is required. Creates one contact; before is null because the new contact did not exist and sipgate returns no created ID.`,
+      schema: contactInput.extend({ confirm_account_wide: accountWideConfirmation }),
+      annotations: actionAnnotations,
+      execute: async ({ confirm_account_wide, ...contact }) =>
+        backend.createContact(contact, confirm_account_wide),
+    }),
+    define({
+      name: "update_contact",
+      description: `${accountWideWriteWarning} In user scope, confirm_account_wide=true is required. Replaces one contact and returns before/after state.`,
+      schema: contactUpdateInput.extend({
+        contact_id: id,
+        confirm_account_wide: accountWideConfirmation,
+      }).refine((value) => value.id === undefined || value.id === value.contact_id, {
+        message: "id must match contact_id when supplied",
+        path: ["id"],
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ contact_id, confirm_account_wide, ...contact }) =>
+        backend.updateContact(contact_id, contact, confirm_account_wide),
+    }),
+    define({
+      name: "delete_contact",
+      description: `${accountWideWriteWarning} PERMANENTLY deletes one contact. In user scope, confirm_account_wide=true is required. Returns the previous contact and a deletion marker.`,
+      schema: z.object({
+        contact_id: id,
+        scopes: z.array(contactScope).min(1).optional(),
+        confirm_account_wide: accountWideConfirmation,
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ contact_id, scopes, confirm_account_wide }) =>
+        backend.deleteContact(contact_id, scopes, confirm_account_wide),
+    }),
+    define({
+      name: "delete_contacts",
+      description: `${accountWideWriteWarning} PERMANENTLY deletes all matching contacts, or all contacts when filters are omitted. In user scope, confirm_account_wide=true is required. Returns before state and a deletion marker.`,
+      schema: z.object({
+        contact_ids: z.array(id).min(1).optional(),
+        scopes: z.array(contactWriteScope).min(1).optional(),
+        source: swaggerString.optional(),
+        confirm_account_wide: accountWideConfirmation,
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ contact_ids, scopes, source, confirm_account_wide }) =>
+        backend.deleteContacts({
+          ...(contact_ids === undefined ? {} : { contactIds: contact_ids }),
+          ...(scopes === undefined ? {} : { scope: scopes }),
+          ...(source === undefined ? {} : { source }),
+        }, confirm_account_wide),
+    }),
+    define({
+      name: "import_contacts_csv",
+      description: `${accountWideWriteWarning} DESTRUCTIVE: imports base64-encoded CSV into the account-wide address book and may overwrite or duplicate contact data. In user scope, confirm_account_wide=true is required. Returns before/after contact state.`,
+      schema: z.object({
+        base64_content: z.string().min(1),
+        confirm_account_wide: accountWideConfirmation,
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ base64_content, confirm_account_wide }) =>
+        backend.importContactsCsv(base64_content, confirm_account_wide),
+    }),
+    define({
+      name: "put_contacts_vcard",
+      description: `${accountWideWriteWarning} Adds or overwrites structured vCards; a supplied contactId overwrites that contact. In user scope, confirm_account_wide=true is required. Returns before/after state.`,
+      schema: z.object({
+        scope: contactScope,
+        data: z.array(structuredVCardUpsert).min(1),
+        confirm_account_wide: accountWideConfirmation,
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ scope, data, confirm_account_wide }) =>
+        backend.putContactsVcard(scope, data, confirm_account_wide),
+    }),
+    define({
+      name: "add_incoming_blacklist",
+      description: `${accountWideWriteWarning} Adds an incoming blacklist entry for the whole account. In user scope, confirm_account_wide=true is required. Returns before/after blacklist state.`,
+      schema: z.object({
+        phone_number: z.string().regex(/^\+?[1-9]\d{1,14}$/, "Use E.164 digits with an optional leading +"),
+        is_block: z.boolean().optional().describe("Block numbers beginning with this value"),
+        confirm_account_wide: accountWideConfirmation,
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ phone_number, is_block, confirm_account_wide }) =>
+        backend.addIncomingBlacklist(phone_number, is_block, confirm_account_wide),
+    }),
+    define({
+      name: "remove_incoming_blacklist",
+      description: `${accountWideWriteWarning} Removes an incoming blacklist entry for the whole account. In user scope, confirm_account_wide=true is required. Returns the previous entry and a deletion marker.`,
+      schema: z.object({
+        phone_number: z.string().regex(/^\+?[1-9]\d{1,14}$/, "Use E.164 digits with an optional leading +"),
+        confirm_account_wide: accountWideConfirmation,
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ phone_number, confirm_account_wide }) =>
+        backend.removeIncomingBlacklist(phone_number, confirm_account_wide),
+    }),
+    define({
+      name: "set_call_restriction",
+      description: `${changeWarning} enable or disable one call restriction for the authenticated sipgate user. The user ID is derived from authentication and cannot target another user. Returns before/after state.`,
+      schema: z.object({
+        restriction: callRestriction,
+        enabled: z.boolean().optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ restriction, enabled }) => backend.setCallRestriction(restriction, enabled),
+    }),
+    define({
+      name: "set_history_read",
+      description: `${changeWarning} mark one owned history entry read or unread. Returns before/after state.`,
+      schema: z.object({ entry_id: id, value: z.boolean().optional() }),
+      annotations: writeAnnotations,
+      execute: async ({ entry_id, value }) => backend.setHistoryRead(entry_id, value),
+    }),
+    define({
+      name: "set_history_note",
+      description: `${changeWarning} replace the note on one owned history entry. Returns before/after state.`,
+      schema: z.object({ entry_id: id, note: swaggerString }),
+      annotations: writeAnnotations,
+      execute: async ({ entry_id, note }) => backend.setHistoryNote(entry_id, note),
+    }),
+    define({
+      name: "set_history_archive",
+      description: `${changeWarning} archive or unarchive one owned history entry. Returns before/after state.`,
+      schema: z.object({ entry_id: id, value: z.boolean().optional() }),
+      annotations: writeAnnotations,
+      execute: async ({ entry_id, value }) => backend.setHistoryArchive(entry_id, value),
+    }),
+    define({
+      name: "update_history_entry",
+      description: `${changeWarning} update archived, note, read, and/or starred state on one owned history entry. Returns before/after state.`,
+      schema: z.object({
+        entry_id: id,
+        archived: z.boolean().optional(),
+        note: swaggerString.optional(),
+        read: z.boolean().optional(),
+        starred: z.boolean().optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ entry_id, archived, note, read, starred }) =>
+        backend.updateHistoryEntry(entry_id, {
+          ...(archived === undefined ? {} : { archived }),
+          ...(note === undefined ? {} : { note }),
+          ...(read === undefined ? {} : { read }),
+          ...(starred === undefined ? {} : { starred }),
+        }),
+    }),
+    define({
+      name: "delete_history_entry",
+      description: `${changeWarning} PERMANENTLY delete one owned call, fax, SMS, or voicemail history entry. This is irreversible. Returns the previous entry and a deletion marker.`,
+      schema: z.object({ entry_id: id }),
+      annotations: writeAnnotations,
+      execute: async ({ entry_id }) => backend.deleteHistoryEntry(entry_id),
+    }),
+    define({
+      name: "update_history_entries",
+      description: `${changeWarning} update fewer than 150 owned history entries in one request. User scope verifies every entry ID. Returns before/after state.`,
+      schema: z.object({
+        entries: z.array(z.object({
+          id,
+          archived: z.boolean().optional(),
+          read: z.boolean().optional(),
+          starred: z.boolean().optional(),
+        })).min(1).max(149),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ entries }) => backend.updateHistoryEntries(entries),
+    }),
+    define({
+      name: "delete_history_entries",
+      description: `${changeWarning} PERMANENTLY delete selected history entries, or all accessible history when entry_ids is omitted. This is irreversible. In user scope, omission is expanded to owned entry IDs and never sends an unconstrained account-wide DELETE. Returns previous state and a deletion marker.`,
+      schema: z.object({ entry_ids: z.array(id).min(1).optional() }),
+      annotations: writeAnnotations,
+      execute: async ({ entry_ids }) => backend.deleteHistoryEntries(entry_ids),
+    }),
+    define({
+      name: "cancel_porting",
+      description: `${accountWideWriteWarning} IRREVERSIBLY cancels an account-wide phone-number porting. confirm_account_wide=true is always required. Returns the previous porting and the cancellation response.`,
+      schema: z.object({
+        porting_id: int32Id,
+        confirm_account_wide: z.literal(true),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ porting_id, confirm_account_wide }) =>
+        backend.cancelPorting(porting_id, confirm_account_wide),
+    }),
+    define({
+      name: "update_sipgateio_settings",
+      description: `${accountWideWriteWarning} Replaces global sipgate.io incoming/outgoing webhook URLs and related settings. In user scope, confirm_account_wide=true is required. Returns before/after state or a clear unavailable result.`,
+      schema: z.object({
+        incoming_url: swaggerString,
+        outgoing_url: swaggerString,
+        log: z.boolean().optional(),
+        push_api_version: int32Id.optional(),
+        whitelist: z.array(swaggerString).optional(),
+        confirm_account_wide: accountWideConfirmation,
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ incoming_url, outgoing_url, log, push_api_version, whitelist, confirm_account_wide }) =>
+        backend.updateSipgateIoSettings({
+          incomingUrl: incoming_url,
+          outgoingUrl: outgoing_url,
+          ...(log === undefined ? {} : { log }),
+          ...(push_api_version === undefined ? {} : { pushApiVersion: push_api_version }),
+          ...(whitelist === undefined ? {} : { whitelist }),
+        }, confirm_account_wide),
+    }),
     define({
       name: "set_number_routing",
       description: `${changeWarning} route a phone number to a sipgate endpoint ID. Reads and returns before/after state.`,

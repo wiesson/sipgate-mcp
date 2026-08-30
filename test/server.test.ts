@@ -37,8 +37,17 @@ function backend(): TelephonyBackend {
     getAddress: async () => ({}),
     listAddressNumbers: async () => ({ items: [] }),
     validateQuickDialNumber: async () => ({}),
+    listContacts: async () => ({ items: [] }),
+    getContact: async () => ({}),
+    listInternalContacts: async () => ({ items: [] }),
+    exportContactsCsv: async () => ({ content: "" }),
+    getContactsVcard: async () => ({ contacts: [] }),
+    listIncomingBlacklist: async () => ({ items: [] }),
+    getCallRestrictions: async () => ({}),
+    getRestrictions: async () => ({ items: [] }),
     getRouting: async () => ({ numbers: [], users: [] }),
     getCallHistory: async () => ({ items: [] }),
+    exportHistory: async () => ({ content: "" }),
     getHistoryEntry: async () => ({ items: [] }),
     listCalls: async () => ({ data: [] }),
     listNotifications: async () => ({ call: [], fax: [], sms: [], voicemail: [] }),
@@ -46,6 +55,29 @@ function backend(): TelephonyBackend {
     listFaxlineNumbers: async () => ({ items: [] }),
     getFaxlineCallerId: async () => ({}),
     getSettings: async () => ({ users: [] }),
+    getBalance: async () => ({}),
+    listPortings: async () => ({ items: [] }),
+    getPorting: async () => ({}),
+    getSipgateIoSettings: async () => ({}),
+    listWebhookLogs: async () => ({ items: [] }),
+    createContact: mutation,
+    updateContact: mutation,
+    deleteContact: mutation,
+    deleteContacts: mutation,
+    importContactsCsv: mutation,
+    putContactsVcard: mutation,
+    addIncomingBlacklist: mutation,
+    removeIncomingBlacklist: mutation,
+    setCallRestriction: mutation,
+    setHistoryRead: mutation,
+    setHistoryNote: mutation,
+    setHistoryArchive: mutation,
+    updateHistoryEntry: mutation,
+    deleteHistoryEntry: mutation,
+    updateHistoryEntries: mutation,
+    deleteHistoryEntries: mutation,
+    cancelPorting: mutation,
+    updateSipgateIoSettings: mutation,
     setNumberRouting: mutation,
     setUserNumberRouting: mutation,
     setForwarding: mutation,
@@ -124,7 +156,7 @@ test("MCP server lists JSON-schema tools and executes a tool over the SDK transp
 
   try {
     const listed = await client.listTools();
-    assert.equal(listed.tools.length, 97);
+    assert.equal(listed.tools.length, 129);
     assert.equal(listed.tools.find((tool) => tool.name === "call_history")?.inputSchema.type, "object");
     assert.equal(client.getServerVersion()?.version, "0.5.0");
     assert.match(client.getInstructions() ?? "", /authenticated user's resources/);
@@ -149,7 +181,7 @@ test("MCP server advertises administrator account scope and read-only mode", asy
     assert.match(client.getInstructions() ?? "", /account scope/);
     assert.match(client.getInstructions() ?? "", /administrator/);
     assert.match(client.getInstructions() ?? "", /read-only/);
-    assert.equal((await client.listTools()).tools.length, 33);
+    assert.equal((await client.listTools()).tools.length, 47);
   } finally {
     await client.close();
     await server.close();

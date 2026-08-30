@@ -7,6 +7,12 @@ import type {
   CallEmailNotificationInput,
   CallSmsNotificationInput,
   CallTransferInput,
+  ContactInput,
+  ContactQuery,
+  ContactScope,
+  ContactUpdateInput,
+  ContactsVcardQuery,
+  DeleteContactsInput,
   DeviceSettingsInput,
   DeviceType,
   FaxEmailNotificationInput,
@@ -14,6 +20,9 @@ import type {
   FaxSmsNotificationInput,
   ForwardingRule,
   GreetingUploadInput,
+  BulkHistoryEntryUpdateInput,
+  HistoryEntryUpdateInput,
+  HistoryExportQuery,
   HistoryQuery,
   JsonValue,
   LocalPrefixInput,
@@ -23,7 +32,9 @@ import type {
   QuickDialInput,
   ResendFaxInput,
   SendFaxInput,
+  SipgateIoSettingsInput,
   SmsEmailNotificationInput,
+  StructuredVCardUpsertInput,
   TelephonyBackend,
   VoicemailEmailNotificationInput,
   VoicemailPlaybackInput,
@@ -364,6 +375,106 @@ class FakeBackend implements TelephonyBackend {
   resendFax(input: ResendFaxInput): Promise<MutationResult> {
     return this.write("resendFax", input);
   }
+  listContacts(input: ContactQuery): Promise<JsonValue> { return this.read("listContacts", input); }
+  getContact(contactId: string): Promise<JsonValue> { return this.read("getContact", contactId); }
+  listInternalContacts(): Promise<JsonValue> { return this.read("listInternalContacts"); }
+  exportContactsCsv(scopes: ContactScope[]): Promise<JsonValue> {
+    return this.read("exportContactsCsv", scopes);
+  }
+  getContactsVcard(input: ContactsVcardQuery): Promise<JsonValue> {
+    return this.read("getContactsVcard", input);
+  }
+  listIncomingBlacklist(): Promise<JsonValue> { return this.read("listIncomingBlacklist"); }
+  getCallRestrictions(userIds?: string[]): Promise<JsonValue> {
+    return this.read("getCallRestrictions", userIds);
+  }
+  getRestrictions(userId: string, restrictions?: string[]): Promise<JsonValue> {
+    return this.read("getRestrictions", userId, restrictions);
+  }
+  exportHistory(input: HistoryExportQuery): Promise<JsonValue> {
+    return this.read("exportHistory", input);
+  }
+  getBalance(): Promise<JsonValue> { return this.read("getBalance"); }
+  listPortings(): Promise<JsonValue> { return this.read("listPortings"); }
+  getPorting(portingId: number): Promise<JsonValue> { return this.read("getPorting", portingId); }
+  getSipgateIoSettings(): Promise<JsonValue> { return this.read("getSipgateIoSettings"); }
+  listWebhookLogs(): Promise<JsonValue> { return this.read("listWebhookLogs"); }
+  createContact(input: ContactInput, confirmAccountWide?: boolean): Promise<MutationResult> {
+    return this.write("createContact", input, confirmAccountWide);
+  }
+  updateContact(
+    contactId: string,
+    input: ContactUpdateInput,
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    return this.write("updateContact", contactId, input, confirmAccountWide);
+  }
+  deleteContact(
+    contactId: string,
+    scopes?: ContactScope[],
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    return this.write("deleteContact", contactId, scopes, confirmAccountWide);
+  }
+  deleteContacts(input: DeleteContactsInput, confirmAccountWide?: boolean): Promise<MutationResult> {
+    return this.write("deleteContacts", input, confirmAccountWide);
+  }
+  importContactsCsv(base64Content: string, confirmAccountWide?: boolean): Promise<MutationResult> {
+    return this.write("importContactsCsv", base64Content, confirmAccountWide);
+  }
+  putContactsVcard(
+    scope: ContactScope,
+    data: StructuredVCardUpsertInput[],
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    return this.write("putContactsVcard", scope, data, confirmAccountWide);
+  }
+  addIncomingBlacklist(
+    phoneNumber: string,
+    isBlock?: boolean,
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    return this.write("addIncomingBlacklist", phoneNumber, isBlock, confirmAccountWide);
+  }
+  removeIncomingBlacklist(
+    phoneNumber: string,
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    return this.write("removeIncomingBlacklist", phoneNumber, confirmAccountWide);
+  }
+  setCallRestriction(restriction: string, enabled?: boolean): Promise<MutationResult> {
+    return this.write("setCallRestriction", restriction, enabled);
+  }
+  setHistoryRead(entryId: string, value?: boolean): Promise<MutationResult> {
+    return this.write("setHistoryRead", entryId, value);
+  }
+  setHistoryNote(entryId: string, note: string): Promise<MutationResult> {
+    return this.write("setHistoryNote", entryId, note);
+  }
+  setHistoryArchive(entryId: string, value?: boolean): Promise<MutationResult> {
+    return this.write("setHistoryArchive", entryId, value);
+  }
+  updateHistoryEntry(entryId: string, input: HistoryEntryUpdateInput): Promise<MutationResult> {
+    return this.write("updateHistoryEntry", entryId, input);
+  }
+  deleteHistoryEntry(entryId: string): Promise<MutationResult> {
+    return this.write("deleteHistoryEntry", entryId);
+  }
+  updateHistoryEntries(inputs: BulkHistoryEntryUpdateInput[]): Promise<MutationResult> {
+    return this.write("updateHistoryEntries", inputs);
+  }
+  deleteHistoryEntries(entryIds?: string[]): Promise<MutationResult> {
+    return this.write("deleteHistoryEntries", entryIds);
+  }
+  cancelPorting(portingId: number, confirmAccountWide?: boolean): Promise<MutationResult> {
+    return this.write("cancelPorting", portingId, confirmAccountWide);
+  }
+  updateSipgateIoSettings(
+    input: SipgateIoSettingsInput,
+    confirmAccountWide?: boolean,
+  ): Promise<MutationResult> {
+    return this.write("updateSipgateIoSettings", input, confirmAccountWide);
+  }
 }
 
 async function invoke(backend: FakeBackend, name: string, input: unknown): Promise<JsonValue> {
@@ -691,6 +802,146 @@ const newToolCases: Array<{
   method: string;
   args: unknown[];
 }> = [
+  {
+    name: "list_contacts",
+    input: { scopes: ["PRIVATE"], phone_numbers: ["+49211123456"] },
+    method: "listContacts",
+    args: [{ scopes: ["PRIVATE"], phoneNumbers: ["+49211123456"], limit: 5000 }],
+  },
+  { name: "get_contact", input: { contact_id: "contact-1" }, method: "getContact", args: ["contact-1"] },
+  { name: "list_internal_contacts", input: {}, method: "listInternalContacts", args: [] },
+  {
+    name: "export_contacts_csv",
+    input: { scopes: ["PRIVATE", "SHARED"] },
+    method: "exportContactsCsv",
+    args: [["PRIVATE", "SHARED"]],
+  },
+  {
+    name: "get_contacts_vcard",
+    input: { scopes: ["PRIVATE"], contact_ids: ["contact-1"] },
+    method: "getContactsVcard",
+    args: [{ scopes: ["PRIVATE"], contactIds: ["contact-1"], limit: 5000 }],
+  },
+  { name: "list_incoming_blacklist", input: {}, method: "listIncomingBlacklist", args: [] },
+  {
+    name: "list_call_restrictions",
+    input: { user_ids: ["w0"] },
+    method: "getCallRestrictions",
+    args: [["w0"]],
+  },
+  {
+    name: "list_restrictions",
+    input: { user_id: "w0", restrictions: ["CAN_GET_BLACKLIST"] },
+    method: "getRestrictions",
+    args: ["w0", ["CAN_GET_BLACKLIST"]],
+  },
+  {
+    name: "export_history",
+    input: { types: ["CALL"], archived: true },
+    method: "exportHistory",
+    args: [{ offset: 0, limit: 1000, types: ["CALL"], archived: true }],
+  },
+  { name: "get_balance", input: {}, method: "getBalance", args: [] },
+  { name: "list_portings", input: {}, method: "listPortings", args: [] },
+  { name: "get_porting", input: { porting_id: 17 }, method: "getPorting", args: [17] },
+  { name: "get_sipgateio_settings", input: {}, method: "getSipgateIoSettings", args: [] },
+  { name: "list_webhook_logs", input: {}, method: "listWebhookLogs", args: [] },
+  {
+    name: "create_contact",
+    input: { name: "Ada Lovelace", scope: "SHARED", confirm_account_wide: true },
+    method: "createContact",
+    args: [{ name: "Ada Lovelace", scope: "SHARED" }, true],
+  },
+  {
+    name: "update_contact",
+    input: { contact_id: "contact-1", id: "contact-1", name: "Ada", confirm_account_wide: true },
+    method: "updateContact",
+    args: ["contact-1", { id: "contact-1", name: "Ada" }, true],
+  },
+  {
+    name: "delete_contact",
+    input: { contact_id: "contact-1", scopes: ["PRIVATE"], confirm_account_wide: true },
+    method: "deleteContact",
+    args: ["contact-1", ["PRIVATE"], true],
+  },
+  {
+    name: "delete_contacts",
+    input: { contact_ids: ["contact-1"], scopes: ["PRIVATE"], confirm_account_wide: true },
+    method: "deleteContacts",
+    args: [{ contactIds: ["contact-1"], scope: ["PRIVATE"] }, true],
+  },
+  {
+    name: "import_contacts_csv",
+    input: { base64_content: "Zmlyc3RuYW1l", confirm_account_wide: true },
+    method: "importContactsCsv",
+    args: ["Zmlyc3RuYW1l", true],
+  },
+  {
+    name: "put_contacts_vcard",
+    input: {
+      scope: "PRIVATE",
+      data: [{ contactId: "contact-1", item: { FN: [{ value: "Ada" }] } }],
+      confirm_account_wide: true,
+    },
+    method: "putContactsVcard",
+    args: ["PRIVATE", [{ contactId: "contact-1", item: { FN: [{ value: "Ada" }] } }], true],
+  },
+  {
+    name: "add_incoming_blacklist",
+    input: { phone_number: "49211123456", is_block: true, confirm_account_wide: true },
+    method: "addIncomingBlacklist",
+    args: ["49211123456", true, true],
+  },
+  {
+    name: "remove_incoming_blacklist",
+    input: { phone_number: "+49211123456", confirm_account_wide: true },
+    method: "removeIncomingBlacklist",
+    args: ["+49211123456", true],
+  },
+  {
+    name: "set_call_restriction",
+    input: { restriction: "roaming", enabled: true },
+    method: "setCallRestriction",
+    args: ["roaming", true],
+  },
+  { name: "set_history_read", input: { entry_id: "h1", value: true }, method: "setHistoryRead", args: ["h1", true] },
+  { name: "set_history_note", input: { entry_id: "h1", note: "Follow up" }, method: "setHistoryNote", args: ["h1", "Follow up"] },
+  { name: "set_history_archive", input: { entry_id: "h1", value: true }, method: "setHistoryArchive", args: ["h1", true] },
+  {
+    name: "update_history_entry",
+    input: { entry_id: "h1", read: true, starred: true },
+    method: "updateHistoryEntry",
+    args: ["h1", { read: true, starred: true }],
+  },
+  { name: "delete_history_entry", input: { entry_id: "h1" }, method: "deleteHistoryEntry", args: ["h1"] },
+  {
+    name: "update_history_entries",
+    input: { entries: [{ id: "h1", archived: true }] },
+    method: "updateHistoryEntries",
+    args: [[{ id: "h1", archived: true }]],
+  },
+  { name: "delete_history_entries", input: { entry_ids: ["h1"] }, method: "deleteHistoryEntries", args: [["h1"]] },
+  {
+    name: "cancel_porting",
+    input: { porting_id: 17, confirm_account_wide: true },
+    method: "cancelPorting",
+    args: [17, true],
+  },
+  {
+    name: "update_sipgateio_settings",
+    input: {
+      incoming_url: "https://example.com/incoming",
+      outgoing_url: "https://example.com/outgoing",
+      log: true,
+      confirm_account_wide: true,
+    },
+    method: "updateSipgateIoSettings",
+    args: [{
+      incomingUrl: "https://example.com/incoming",
+      outgoingUrl: "https://example.com/outgoing",
+      log: true,
+    }, true],
+  },
   { name: "list_calls", input: {}, method: "listCalls", args: [] },
   {
     name: "list_notifications",
@@ -1102,7 +1353,30 @@ test("read-only mode does not register write tools", () => {
     "get_autorecording_settings",
     "get_faxline_caller_id",
     "get_settings",
+    "list_contacts",
+    "get_contact",
+    "list_internal_contacts",
+    "export_contacts_csv",
+    "get_contacts_vcard",
+    "list_incoming_blacklist",
+    "list_call_restrictions",
+    "list_restrictions",
+    "export_history",
+    "get_balance",
+    "list_portings",
+    "get_porting",
+    "get_sipgateio_settings",
+    "list_webhook_logs",
   ]);
+});
+
+test("user-scope account-wide writes require explicit confirmation", async () => {
+  const backend = new FakeBackend();
+  await assert.rejects(
+    invoke(backend, "create_contact", { name: "Ada" }),
+    /confirm_account_wide/,
+  );
+  assert.deepEqual(backend.calls, []);
 });
 
 test("tool annotations and charge warnings distinguish every read and write tool", () => {
@@ -1136,6 +1410,6 @@ test("tool annotations and charge warnings distinguish every read and write tool
     assert.ok(fax);
     assert.match(fax.description, /FAX INCURS CHARGES/);
   }
-  assert.equal(definitions.filter((tool) => tool.annotations.readOnlyHint).length, 33);
-  assert.equal(definitions.filter((tool) => !tool.annotations.readOnlyHint).length, 64);
+  assert.equal(definitions.filter((tool) => tool.annotations.readOnlyHint).length, 47);
+  assert.equal(definitions.filter((tool) => !tool.annotations.readOnlyHint).length, 82);
 });

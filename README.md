@@ -52,7 +52,8 @@ not run as a daemon and does not need to be started manually.
 Use `sipgate-mcp setup --client codex` or `--client claude` to configure only
 one client. `--allow-writes` and `--read-only` pick the mode without being
 asked; write tools let the assistant place calls, send SMS/faxes, and configure
-routing, devices, phonelines, voicemail, greetings, recordings, and faxlines.
+routing, devices, phonelines, voicemail, greetings, recordings, faxlines,
+contacts, blocklists, call restrictions, history, portings, and sipgate.io.
 `--dry-run` prints the secret-free registration commands
 without changing the Keychain or client configuration. Repeated setup runs
 reuse existing Keychain credentials; use `--replace-credentials` only to rotate
@@ -108,7 +109,7 @@ addition to sipgate's own user role and PAT scopes:
 
 | Value | Behavior |
 | --- | --- |
-| `user` (default) | Resolves the authenticated user through `/authorization/userinfo`; returns only that user and their assigned numbers, notifications, faxlines, phonelines, voicemails, greetings, and attached devices; forces user-specific device, routing, and settings reads; constrains history and active calls to owned connections/participants; and validates every write target against owned numbers, phonelines, nested voicemail/forwarding/greeting resources, devices, faxlines, notifications, or emergency addresses associated with an owned device/number. |
+| `user` (default) | Resolves the authenticated user through `/authorization/userinfo`; returns only that user and their assigned numbers, notifications, faxlines, phonelines, voicemails, greetings, and attached devices; forces user-specific device, routing, restriction, and settings reads; constrains history reads, exports, and mutations to owned connections/entries; and validates every write target against owned numbers, phonelines, nested voicemail/forwarding/greeting resources, devices, faxlines, notifications, or emergency addresses associated with an owned device/number. Account-wide contact, blacklist, porting-cancellation, and sipgate.io writes require `confirm_account_wide: true`; their reads are allowed and clearly labelled account-wide. |
 | `account` | Enables account-wide reads and writes. Startup fails unless `/users/{authenticatedUserId}` reports `admin: true`. Requires `users:read` for the administrator check. |
 
 Token scopes are permission ceilings, not role elevation. For example,
@@ -190,6 +191,38 @@ listed specific and parent scopes offered by the PAT UI when in doubt.
 | `set_faxline_caller_id` | Write | Owned faxline/number checks, pre/post caller-ID reads, and `PUT /{userId}/faxlines/{faxlineId}/callerid` | `faxlines:read`, `faxlines:write`, plus owned-number read scopes |
 | `set_faxline_tagline` | Write | Owned-faxline pre/post list reads and `PUT /{userId}/faxlines/{faxlineId}/tagline` | `faxlines:read`, `faxlines:write` |
 | `get_settings` | Read | `GET /users[/userId]`, `GET /{userId}/devices`, `GET /{userId}/phonelines[/phonelineId]` | `users:read`, `devices:read`, `phonelines:read` |
+| `list_contacts` | Read, account-wide | `GET /contacts` with phone, scope, and pagination filters | `contacts:read` |
+| `get_contact` | Read, account-wide | `GET /contacts/{contactId}` | `contacts:read` |
+| `list_internal_contacts` | Read, account-wide | Deprecated `GET /contacts/internal` compatibility route | `contacts:read` |
+| `export_contacts_csv` | Read, account-wide | `GET /contacts/csv` and return CSV text | `contacts:read` |
+| `get_contacts_vcard` | Read, account-wide | `GET /contacts/vcard` with structured-vCard filters | `contacts:read` |
+| `create_contact` | Write/action, account-wide | `POST /contacts`; user scope requires `confirm_account_wide: true` | `contacts:write` |
+| `update_contact` | Write, account-wide | Before/after `GET /contacts/{contactId}`, then `PUT` on the same path; confirmation required in user scope | `contacts:read`, `contacts:write` |
+| `delete_contact` | Destructive write, account-wide | Before-state `GET`, then `DELETE /contacts/{contactid}`; confirmation required in user scope | `contacts:read`, `contacts:write` |
+| `delete_contacts` | Destructive write, account-wide | Before-state contact reads, then `DELETE /contacts`; omitted filters delete all; confirmation required in user scope | `contacts:read`, `contacts:write` |
+| `import_contacts_csv` | Destructive write/action, account-wide | Pre/post `GET /contacts`, then `POST /contacts/import/csv`; confirmation required in user scope | `contacts:read`, `contacts:write` |
+| `put_contacts_vcard` | Write, account-wide | Pre/post `GET /contacts/vcard`, then `PUT /contacts/vcard`; supplied IDs are overwritten; confirmation required in user scope | `contacts:read`, `contacts:write` |
+| `list_incoming_blacklist` | Read, account-wide | `GET /blacklist/incoming` | `blacklist:read` |
+| `add_incoming_blacklist` | Write/action, account-wide | Pre/post blacklist reads, then `POST /blacklist/incoming`; confirmation required in user scope | `blacklist:read`, `blacklist:write` |
+| `remove_incoming_blacklist` | Write, account-wide | Before-state blacklist read, then `DELETE /blacklist/incoming/{phoneNumber}`; confirmation required in user scope | `blacklist:read`, `blacklist:write` |
+| `list_call_restrictions` | Read | User scope forces the authenticated ID in `GET /callrestrictions`; account scope accepts selected IDs | `callrestrictions:read` |
+| `set_call_restriction` | Write | Pre/post restriction reads, then `POST /{authenticatedUserId}/callrestrictions/{restriction}` | `callrestrictions:read`, `callrestrictions:write` |
+| `list_restrictions` | Read | `GET /restrictions`; user scope accepts only the authenticated user ID | Swagger declares the internal scope |
+| `export_history` | Read | User: owned-connection-filtered `GET /history/export`; account: filtered or account-wide export | `history:read`; user ownership also needs `phonelines:read`, `devices:read` |
+| `set_history_read` | Write | Owned-entry check, pre/post `GET /history/{entryId}`, then `PUT /history/{entryId}/read` | `history:read`, `history:write`; user ownership also needs connection read scopes |
+| `set_history_note` | Write | Owned-entry check, pre/post entry reads, then `PUT /history/{entryId}/note` | `history:read`, `history:write`; user ownership also needs connection read scopes |
+| `set_history_archive` | Write | Owned-entry check, pre/post entry reads, then `PUT /history/{entryId}/archive` | `history:read`, `history:write`; user ownership also needs connection read scopes |
+| `update_history_entry` | Write | Owned-entry check, pre/post entry reads, then `PUT /history/{entryId}` | `history:read`, `history:write`; user ownership also needs connection read scopes |
+| `delete_history_entry` | Destructive write | Owned-entry and before-state reads, then `DELETE /history/{entryId}` | `history:read`, `history:write`; user ownership also needs connection read scopes |
+| `update_history_entries` | Write | Verify every entry, read before/after state, then `PUT /history` with fewer than 150 entries | `history:read`, `history:write`; user ownership also needs connection read scopes |
+| `delete_history_entries` | Destructive write | `DELETE /history`; user scope expands omission to IDs enumerated through owned connection filters and never sends an unconstrained delete | `history:read`, `history:write`; user ownership also needs `phonelines:read`, `devices:read` |
+| `get_balance` | Read, account-wide | `GET /balance` | `balance:read` |
+| `list_portings` | Read, account-wide | `GET /portings` | `portings:read` |
+| `get_porting` | Read, account-wide | `GET /portings/{portingId}` | `portings:read` |
+| `cancel_porting` | Destructive write, account-wide | Before-state `GET`, then `DELETE /portings/{portingId}`; always requires `confirm_account_wide: true` | `portings:read`, `portings:write` |
+| `get_sipgateio_settings` | Read, account-wide | `GET /settings/sipgateio`; 403/404 returns an unavailable result | `settings:read`, `settings:sipgateio:read` |
+| `update_sipgateio_settings` | Write, account-wide | Pre/post settings reads, then `PUT /settings/sipgateio`; confirmation required in user scope | `settings:read`, `settings:write`, `settings:sipgateio:read`, `settings:sipgateio:write` |
+| `list_webhook_logs` | Read, account-wide | `GET /log/webhooks`; 403/404 returns an unavailable result | `log:webhooks:read` |
 | `set_number_routing` | Write | User: pre/post reads through own phonelines; account: pre/post `GET /numbers`; all modes: `PUT /numbers/{numberId}` | `numbers:write`; user also needs `phonelines:read`, `phonelines:numbers:read`; account needs `numbers:read` |
 | `set_forwarding` | Write | User: phoneline ownership read; then pre/post forwarding reads and `PUT` | `phonelines:read`, `phonelines:write`, `phonelines:forwardings:read`, `phonelines:forwardings:write` |
 | `set_dnd` | Write | User: device ownership read; then pre/post `GET /devices/{deviceId}` and `PUT` | `devices:read`, `devices:write` |
@@ -231,7 +264,7 @@ listed specific and parent scopes offered by the PAT UI when in doubt.
 | `send_fax` | Write/action | User: faxline ownership read; `POST /sessions/fax` | `sessions:write`, `sessions:fax:write`; user also needs `faxlines:read` |
 | `resend_fax` | Write/action | User: required faxline ownership read; `POST /sessions/fax/resend` | `sessions:write`, `sessions:fax:write`; user also needs `faxlines:read` |
 
-Every write tool returns a JSON object with `before` and `after`. Where a resource can be read, the tool reads current state first and reads it back after the change. Fax send/resend and voicemail playback/recording sessions use `before: null` and return an explicit no-read-back note; creates without a previous resource and deletes without a documented read-back return an initial-state or deletion marker. SMS history can update asynchronously, and `/calls` only contains established calls.
+Every write tool returns a JSON object with `before` and `after`. Where a resource can be read, the tool reads current state first and reads it back after the change. Fax send/resend, voicemail playback/recording, and contact creation use `before: null` and return an explicit no-read-back note where sipgate exposes no synchronous identity/state; deletes return the previous state and a deletion marker. SMS history can update asynchronously, and `/calls` only contains established calls.
 
 ### Tool notes
 
@@ -246,6 +279,10 @@ Every write tool returns a JSON object with `before` and `after`. Where a resour
 - User-scoped `list_calls` and every live-call mutation read the account-wide `/calls` feed but expose or operate on a call only when at least one participant's `participantId` matches an owned device or `phoneNumber` matches an owned phone number. A missing, unknown, or unreadable match fails closed. sipgate's Swagger does not expose a separate call-owner user or device field.
 - Notification IDs live inside the nested email/SMS/report target arrays returned by `GET /{userId}/notifications`; deletion verifies that nested ID before sending the request. Call-notification endpoints are checked against owned devices/phonelines, and fax notifications against owned faxlines.
 - Fax send and resend actions incur charges. In user scope `resend_fax` requires `faxline_id` even though sipgate marks it optional, because omitting it leaves no documented ownership relationship that can be verified before the chargeable action.
+- Contacts and the incoming blacklist are account-wide sipgate resources. Their reads remain available in user scope, but every write requires `confirm_account_wide: true`; CSV import and contact/history deletion are described as destructive. Porting cancellation always requires the same explicit confirmation and is irreversible through v2.
+- Every single-entry history mutation verifies `connectionIds` against the authenticated user's owned device/phoneline IDs. User-scoped bulk updates verify every entry. An omitted ID list on bulk deletion is expanded by paging both archived and unarchived history through owned connection filters, then deleting only those IDs; an unconstrained `DELETE /history` is never sent in user scope.
+- `set_call_restriction` never accepts a user ID: the backend resolves `/authorization/userinfo` and posts only to `/{authenticatedUserId}/callrestrictions/{restriction}`. `list_call_restrictions` and `list_restrictions` reject foreign users in user scope.
+- Balance, portings, global sipgate.io settings, and webhook logs are account-wide reads that remain visible in user scope. Updating global sipgate.io settings requires account-wide confirmation in user scope. sipgate.io settings/log endpoints translate 403/404 into explicit unavailable results.
 - Call and automated recording can incur charges and are legally sensitive. In Germany the caller is responsible for obtaining consent from every participant; changing or disabling an announcement does not remove that responsibility. Voicemail playback/recording initiates a call and may also incur charges.
 - Address IDs are exposed as integers because sipgate declares every address path parameter as `int32`. In user scope an address is visible or mutable only when an owned device references it, an owned number contains its `addressId`, or `/addresses/{addressId}/numbers` contains an owned number.
 - Device creation can affect billing, and changing an address can deactivate associated telephone numbers depending on country. Every write-tool description advertises the account change and potential charges.
@@ -257,7 +294,7 @@ Every write tool returns a JSON object with `before` and `after`. Where a resour
 
 ## Read-only mode
 
-Set `SIPGATE_MCP_READONLY=1` to register only the 33 read tools. Write tools are absent from `tools/list`, rather than merely failing when called.
+Set `SIPGATE_MCP_READONLY=1` to register only the 47 read tools. Write tools are absent from `tools/list`, rather than merely failing when called.
 
 ```bash
 export SIPGATE_MCP_READONLY=1
@@ -366,7 +403,9 @@ MCP stdio server
   written to Codex or Claude configuration.
 - User scope is the default and validates user IDs plus number, phoneline,
   nested voicemail/greeting/forwarding, device, faxline, call, recording-
-  extension, and history ownership before delegation.
+  extension, and history ownership before delegation. Bulk history deletion is
+  expanded to owned entry IDs, and account-wide writes require explicit
+  confirmation where documented above.
 - Account scope fails startup unless the authenticated sipgate user reports `admin: true`.
 - The Basic Auth header exists only in memory and is sent only to the fixed sipgate API base URL.
 - API error bodies are discarded. User-facing errors never include request headers, response bodies, or credentials.
@@ -398,7 +437,7 @@ Maintainer setup and the one-time first-publish procedure are documented in
 
 ## API provenance and limitations
 
-The endpoint paths, query parameters, request bodies, response models, and scope names were checked against sipgate's live public [REST API v2 Swagger document](https://api.sipgate.com/v2/swagger.json) and [Swagger UI](https://api.sipgate.com/v2/doc) on 2026-08-29. PAT Basic Auth was checked against sipgate's public authentication guide. No authenticated production account was available during development, so real-account behavior remains to be confirmed with the smoke test above—especially product-specific availability, eventual history updates, and classic versus Neo PBX calling.
+The endpoint paths, query parameters, request bodies, response models, and scope names were checked against sipgate's live public [REST API v2 Swagger document](https://api.sipgate.com/v2/swagger.json) and [Swagger UI](https://api.sipgate.com/v2/doc) on 2026-08-30. PAT Basic Auth was checked against sipgate's public authentication guide. No authenticated production account was available during development, so real-account behavior remains to be confirmed with the smoke test above—especially product-specific availability, eventual history updates, and classic versus Neo PBX calling.
 
 ## Roadmap
 

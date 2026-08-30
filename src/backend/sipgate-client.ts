@@ -15,6 +15,7 @@ export interface RequestOptions {
   method?: "GET" | "POST" | "PUT" | "DELETE";
   query?: Record<string, QueryValue>;
   body?: JsonValue;
+  accept?: string;
 }
 
 export class SipgateApiError extends Error {
@@ -74,6 +75,25 @@ export class SipgateClient {
     path: string,
     options: RequestOptions = {},
   ): Promise<T> {
+    const response = await this.fetch(path, options);
+    if (response.status === 204) return undefined as T;
+
+    const text = await response.text();
+    if (!text) return undefined as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new SipgateApiError("sipgate returned an unexpected non-JSON response.", response.status);
+    }
+  }
+
+  public async requestText(path: string, options: RequestOptions = {}): Promise<string> {
+    const response = await this.fetch(path, options);
+    if (response.status === 204) return "";
+    return response.text();
+  }
+
+  private async fetch(path: string, options: RequestOptions): Promise<Response> {
     const url = new URL(`${this.#baseUrl}${path.startsWith("/") ? path : `/${path}`}`);
     for (const [name, value] of Object.entries(options.query ?? {})) {
       if (value === undefined) continue;
@@ -82,7 +102,7 @@ export class SipgateClient {
     }
 
     const headers: Record<string, string> = {
-      Accept: "application/json",
+      Accept: options.accept ?? "application/json",
       Authorization: this.#authorization,
     };
     if (options.body !== undefined) headers["Content-Type"] = "application/json";
@@ -99,14 +119,6 @@ export class SipgateClient {
     }
 
     if (!response.ok) throw errorForStatus(response.status, response.headers.get("retry-after"));
-    if (response.status === 204) return undefined as T;
-
-    const text = await response.text();
-    if (!text) return undefined as T;
-    try {
-      return JSON.parse(text) as T;
-    } catch {
-      throw new SipgateApiError("sipgate returned an unexpected non-JSON response.", response.status);
-    }
+    return response;
   }
 }

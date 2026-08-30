@@ -25,7 +25,9 @@ function backendWithResponses(responses: JsonValue[]): {
     const value = queue.shift();
     return value === undefined
       ? new Response(null, { status: 204 })
-      : new Response(JSON.stringify(value), { status: 200 });
+      : typeof value === "string"
+        ? new Response(value, { status: 200 })
+        : new Response(JSON.stringify(value), { status: 200 });
   }) as typeof fetch;
   const client = new SipgateClient({ tokenId: "id", token: "secret", fetch: fetchMock });
   return { backend: new SipgateBackend(client), requests };
@@ -1363,4 +1365,364 @@ test("SipgateBackend refuses to delete a recording greeting that is not the conf
 
   await assert.rejects(backend.deleteAutorecordingGreeting("g9"), /not the one currently configured/);
   assert.equal(requests.length, 1);
+});
+
+const finalBatchReadCases: Array<{
+  name: string;
+  response: JsonValue;
+  execute: (backend: SipgateBackend) => Promise<JsonValue>;
+  path: string;
+  query?: string;
+}> = [
+  {
+    name: "list_contacts",
+    response: { items: [] },
+    execute: (backend) => backend.listContacts({
+      phoneNumbers: ["+49211123456"],
+      limit: 25,
+      lastId: "c0",
+      scopes: ["PRIVATE"],
+    }),
+    path: "/v2/contacts",
+    query: "phonenumbers=%2B49211123456&limit=25&lastId=c0&scopes=PRIVATE",
+  },
+  {
+    name: "get_contact",
+    response: { id: "contact 1" },
+    execute: (backend) => backend.getContact("contact 1"),
+    path: "/v2/contacts/contact%201",
+  },
+  {
+    name: "list_internal_contacts",
+    response: { items: [] },
+    execute: (backend) => backend.listInternalContacts(),
+    path: "/v2/contacts/internal",
+  },
+  {
+    name: "export_contacts_csv",
+    response: "firstname,lastname,number\nAda,Lovelace,+4915799912345\n",
+    execute: (backend) => backend.exportContactsCsv(["PRIVATE", "SHARED"]),
+    path: "/v2/contacts/csv",
+    query: "scope=PRIVATE&scope=SHARED",
+  },
+  {
+    name: "get_contacts_vcard",
+    response: { contacts: [] },
+    execute: (backend) => backend.getContactsVcard({
+      scopes: ["PRIVATE"],
+      contactIds: ["c0"],
+      wantedFields: ["FN"],
+      limit: 50,
+    }),
+    path: "/v2/contacts/vcard",
+    query: "scope=PRIVATE&contactIds=c0&wantedFields=FN&limit=50",
+  },
+  {
+    name: "list_incoming_blacklist",
+    response: { items: [] },
+    execute: (backend) => backend.listIncomingBlacklist(),
+    path: "/v2/blacklist/incoming",
+  },
+  {
+    name: "list_call_restrictions",
+    response: { userId: "w0", roaming: false },
+    execute: (backend) => backend.getCallRestrictions(["w0"]),
+    path: "/v2/callrestrictions",
+    query: "userIds=w0",
+  },
+  {
+    name: "list_restrictions",
+    response: { items: [] },
+    execute: (backend) => backend.getRestrictions("w0", ["CAN_GET_BLACKLIST"]),
+    path: "/v2/restrictions",
+    query: "userId=w0&restriction=CAN_GET_BLACKLIST",
+  },
+  {
+    name: "export_history",
+    response: "id,type\nh0,CALL\n",
+    execute: (backend) => backend.exportHistory({
+      connectionIds: ["e0"],
+      types: ["CALL"],
+      directions: ["OUTGOING"],
+      offset: 0,
+      limit: 100,
+      archived: false,
+      starred: ["STARRED"],
+      from: "2026-01-01T00:00:00Z",
+      to: "2026-01-31T23:59:59Z",
+    }),
+    path: "/v2/history/export",
+    query: "connectionIds=e0&types=CALL&directions=OUTGOING&offset=0&limit=100&archived=false&starred=STARRED&from=2026-01-01T00%3A00%3A00Z&to=2026-01-31T23%3A59%3A59Z",
+  },
+  {
+    name: "get_balance",
+    response: { amount: 35000, currency: "EUR" },
+    execute: (backend) => backend.getBalance(),
+    path: "/v2/balance",
+  },
+  {
+    name: "list_portings",
+    response: { items: [] },
+    execute: (backend) => backend.listPortings(),
+    path: "/v2/portings",
+  },
+  {
+    name: "get_porting",
+    response: { id: "17" },
+    execute: (backend) => backend.getPorting(17),
+    path: "/v2/portings/17",
+  },
+  {
+    name: "get_sipgateio_settings",
+    response: { incomingUrl: "https://example.com/in" },
+    execute: (backend) => backend.getSipgateIoSettings(),
+    path: "/v2/settings/sipgateio",
+  },
+  {
+    name: "list_webhook_logs",
+    response: { items: [] },
+    execute: (backend) => backend.listWebhookLogs(),
+    path: "/v2/log/webhooks",
+  },
+];
+
+for (const readCase of finalBatchReadCases) {
+  test(`SipgateBackend implements the ${readCase.name} tool endpoint`, async () => {
+    const { backend, requests } = backendWithResponses([readCase.response]);
+    await readCase.execute(backend);
+    const url = new URL(requests[0]?.url ?? "");
+    assert.equal(requests[0]?.method, "GET");
+    assert.equal(url.pathname, readCase.path);
+    assert.equal(url.searchParams.toString(), readCase.query ?? "");
+  });
+}
+
+test("SipgateBackend implements the create_contact tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([null]);
+  const result = await backend.createContact({ name: "Ada", scope: "SHARED" }, true);
+  assert.equal(result.before, null);
+  assert.equal(requests[0]?.method, "POST");
+  assert.equal(new URL(requests[0]?.url ?? "").pathname, "/v2/contacts");
+  assert.equal(requests[0]?.body, JSON.stringify({ name: "Ada", scope: "SHARED" }));
+});
+
+test("SipgateBackend implements the update_contact tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([
+    { id: "c0", name: "Ada" },
+    null,
+    { id: "c0", name: "Ada Lovelace" },
+  ]);
+  const result = await backend.updateContact("c0", { id: "c0", name: "Ada Lovelace" }, true);
+  assert.deepEqual(result.after, { id: "c0", name: "Ada Lovelace" });
+  assert.equal(requests[1]?.method, "PUT");
+  assert.equal(requests[1]?.body, JSON.stringify({ id: "c0", name: "Ada Lovelace" }));
+});
+
+test("SipgateBackend implements the delete_contact tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([{ id: "c0" }, { deleted: true }]);
+  const result = await backend.deleteContact("c0", ["PRIVATE"], true);
+  assert.deepEqual(result.before, { id: "c0" });
+  assert.equal(requests[1]?.method, "DELETE");
+  assert.equal(new URL(requests[1]?.url ?? "").searchParams.toString(), "scope=PRIVATE");
+});
+
+test("SipgateBackend implements the delete_contacts tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([{ id: "c0" }, { deleted: ["c0"] }]);
+  const result = await backend.deleteContacts({ contactIds: ["c0"], scope: ["PRIVATE"] }, true);
+  assert.deepEqual(result.before, [{ id: "c0" }]);
+  assert.equal(requests[1]?.method, "DELETE");
+  assert.equal(requests[1]?.body, JSON.stringify({ contactIds: ["c0"], scope: ["PRIVATE"] }));
+});
+
+test("SipgateBackend implements the import_contacts_csv tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([
+    { items: [{ id: "c0" }] },
+    null,
+    { items: [{ id: "c0" }, { id: "c1" }] },
+  ]);
+  const result = await backend.importContactsCsv("Zmlyc3RuYW1l", true);
+  assert.deepEqual(result.before, { items: [{ id: "c0" }], totalCount: 1 });
+  assert.deepEqual(result.after, { items: [{ id: "c0" }, { id: "c1" }], totalCount: 2 });
+  assert.equal(requests[1]?.method, "POST");
+  assert.equal(requests[1]?.body, JSON.stringify({ base64Content: "Zmlyc3RuYW1l" }));
+});
+
+test("SipgateBackend implements the put_contacts_vcard tool endpoint", async () => {
+  const data = [{ contactId: "c0", item: { FN: [{ value: "Ada" }] } }];
+  const { backend, requests } = backendWithResponses([
+    { contacts: [{ meta: { UUID: "c0" } }] },
+    { result: [{ contactId: "c0" }] },
+    { contacts: [{ meta: { UUID: "c0" }, items: { FN: [{ value: "Ada" }] } }] },
+  ]);
+  const result = await backend.putContactsVcard("PRIVATE", data, true);
+  assert.notDeepEqual(result.before, result.after);
+  assert.equal(requests[1]?.method, "PUT");
+  assert.equal(new URL(requests[1]?.url ?? "").searchParams.toString(), "scope=PRIVATE");
+  assert.equal(requests[1]?.body, JSON.stringify({ data }));
+});
+
+test("SipgateBackend implements the add_incoming_blacklist tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([
+    { items: [] },
+    { phoneNumber: "+49211123456", isBlock: true },
+    { items: [{ phoneNumber: "+49211123456", isBlock: true }] },
+  ]);
+  const result = await backend.addIncomingBlacklist("49211123456", true, true);
+  assert.deepEqual(result.before, { items: [] });
+  assert.equal(requests[1]?.method, "POST");
+  assert.equal(requests[1]?.body, JSON.stringify({ phoneNumber: "49211123456", isBlock: true }));
+});
+
+test("SipgateBackend implements the remove_incoming_blacklist tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([
+    { items: [{ phoneNumber: "+49211123456", isBlock: false }] },
+    null,
+  ]);
+  const result = await backend.removeIncomingBlacklist("+49211123456", true);
+  assert.deepEqual(result.before, { phoneNumber: "+49211123456", isBlock: false });
+  assert.equal(requests[1]?.method, "DELETE");
+  assert.equal(new URL(requests[1]?.url ?? "").pathname, "/v2/blacklist/incoming/%2B49211123456");
+});
+
+test("SipgateBackend implements the set_call_restriction tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([
+    { sub: "w0" },
+    { userId: "w0", roaming: false },
+    { userId: "w0", roaming: true },
+    { userId: "w0", roaming: true },
+  ]);
+  const result = await backend.setCallRestriction("roaming", true);
+  assert.deepEqual(result.before, { userId: "w0", roaming: false });
+  assert.deepEqual(result.after, { userId: "w0", roaming: true });
+  assert.equal(requests[2]?.method, "POST");
+  assert.equal(new URL(requests[2]?.url ?? "").pathname, "/v2/w0/callrestrictions/roaming");
+  assert.equal(requests[2]?.body, JSON.stringify({ enabled: true }));
+});
+
+const historyPropertyCases: Array<{
+  name: string;
+  execute: (backend: SipgateBackend) => Promise<MutationResult>;
+  suffix: string;
+  body: JsonValue;
+}> = [
+  { name: "set_history_read", execute: (backend) => backend.setHistoryRead("h0", true), suffix: "/read", body: { value: true } },
+  { name: "set_history_note", execute: (backend) => backend.setHistoryNote("h0", "Note"), suffix: "/note", body: { note: "Note" } },
+  { name: "set_history_archive", execute: (backend) => backend.setHistoryArchive("h0", true), suffix: "/archive", body: { value: true } },
+];
+
+for (const historyCase of historyPropertyCases) {
+  test(`SipgateBackend implements the ${historyCase.name} tool endpoint`, async () => {
+    const { backend, requests } = backendWithResponses([
+      { id: "h0", read: false },
+      null,
+      { id: "h0", read: true },
+    ]);
+    const result = await historyCase.execute(backend);
+    assert.deepEqual(result.before, { id: "h0", read: false });
+    assert.equal(requests[1]?.method, "PUT");
+    assert.equal(new URL(requests[1]?.url ?? "").pathname, `/v2/history/h0${historyCase.suffix}`);
+    assert.equal(requests[1]?.body, JSON.stringify(historyCase.body));
+  });
+}
+
+test("SipgateBackend implements the update_history_entry tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([
+    { id: "h0", starred: false },
+    null,
+    { id: "h0", starred: true },
+  ]);
+  const result = await backend.updateHistoryEntry("h0", { note: "Note", starred: true });
+  assert.deepEqual(result.after, { id: "h0", starred: true });
+  assert.equal(requests[1]?.method, "PUT");
+  assert.equal(requests[1]?.body, JSON.stringify({ note: "Note", starred: true }));
+});
+
+test("SipgateBackend implements the delete_history_entry tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([{ id: "h0" }, null]);
+  const result = await backend.deleteHistoryEntry("h0");
+  assert.deepEqual(result.before, { id: "h0" });
+  assert.equal(requests[1]?.method, "DELETE");
+  assert.equal(new URL(requests[1]?.url ?? "").pathname, "/v2/history/h0");
+});
+
+test("SipgateBackend implements the update_history_entries tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([
+    { id: "h0", read: false },
+    null,
+    { id: "h0", read: true },
+  ]);
+  const result = await backend.updateHistoryEntries([{ id: "h0", read: true }]);
+  assert.deepEqual(result.before, [{ id: "h0", read: false }]);
+  assert.deepEqual(result.after, [{ id: "h0", read: true }]);
+  assert.equal(requests[1]?.method, "PUT");
+  assert.equal(requests[1]?.body, JSON.stringify([{ id: "h0", read: true }]));
+});
+
+test("SipgateBackend implements the delete_history_entries tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([{ id: "h0" }, null]);
+  const result = await backend.deleteHistoryEntries(["h0"]);
+  assert.deepEqual(result.before, [{ id: "h0" }]);
+  assert.equal(requests[1]?.method, "DELETE");
+  assert.equal(new URL(requests[1]?.url ?? "").searchParams.toString(), "id=h0");
+});
+
+test("SipgateBackend implements the cancel_porting tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([
+    { id: "17", revocable: true },
+    { items: [{ id: "17", status: 600 }] },
+  ]);
+  const result = await backend.cancelPorting(17, true);
+  assert.deepEqual(result.before, { id: "17", revocable: true });
+  assert.equal(requests[1]?.method, "DELETE");
+  assert.equal(new URL(requests[1]?.url ?? "").pathname, "/v2/portings/17");
+});
+
+test("SipgateBackend implements the update_sipgateio_settings tool endpoint", async () => {
+  const { backend, requests } = backendWithResponses([
+    { incomingUrl: "https://old.example/in", outgoingUrl: "https://old.example/out" },
+    null,
+    { incomingUrl: "https://new.example/in", outgoingUrl: "https://new.example/out", log: true },
+  ]);
+  const result = await backend.updateSipgateIoSettings({
+    incomingUrl: "https://new.example/in",
+    outgoingUrl: "https://new.example/out",
+    log: true,
+    pushApiVersion: 1,
+    whitelist: ["w0"],
+  }, true);
+  assert.deepEqual(result.before, {
+    incomingUrl: "https://old.example/in",
+    outgoingUrl: "https://old.example/out",
+  });
+  assert.equal(requests[1]?.method, "PUT");
+  assert.equal(requests[1]?.body, JSON.stringify({
+    incomingUrl: "https://new.example/in",
+    outgoingUrl: "https://new.example/out",
+    log: true,
+    pushApiVersion: 1,
+    whitelist: ["w0"],
+  }));
+});
+
+test("SipgateBackend reports unavailable account-wide sipgate.io reads with status", async () => {
+  const { backend: settingsBackend } = backendWithStatuses([{ status: 403 }]);
+  const settings = await settingsBackend.getSipgateIoSettings() as Record<string, unknown>;
+  assert.equal(settings.available, false);
+  assert.equal(settings.httpStatus, 403);
+
+  const { backend: logsBackend } = backendWithStatuses([{ status: 404 }]);
+  const logs = await logsBackend.listWebhookLogs() as Record<string, unknown>;
+  assert.deepEqual(logs.items, []);
+  assert.equal(logs.httpStatus, 404);
+});
+
+test("SipgateBackend does not update unavailable sipgate.io settings", async () => {
+  const { backend, requests } = backendWithStatuses([{ status: 403 }]);
+  const result = await backend.updateSipgateIoSettings({
+    incomingUrl: "https://example.com/in",
+    outgoingUrl: "https://example.com/out",
+  }, true);
+  assert.equal(requests.length, 1);
+  assert.equal((result.after as Record<string, unknown>).changed, false);
+  assert.equal((result.after as Record<string, unknown>).httpStatus, 403);
 });

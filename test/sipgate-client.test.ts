@@ -38,6 +38,22 @@ test("SipgateClient sends Basic Auth, query parameters, and JSON bodies", async 
   assert.equal(request.init?.body, JSON.stringify({ value: true }));
 });
 
+test("SipgateClient returns raw export text with the requested Accept header", async () => {
+  let headers = new Headers();
+  const fetchMock = (async (_input: string | URL | Request, init?: RequestInit) => {
+    headers = new Headers(init?.headers);
+    return new Response("id,type\nh0,CALL\n", { status: 200 });
+  }) as typeof fetch;
+  const client = new SipgateClient({ tokenId: "token-id", token: "token-secret", fetch: fetchMock });
+
+  const result = await client.requestText("/history/export", {
+    accept: "application/octet-stream",
+  });
+
+  assert.equal(result, "id,type\nh0,CALL\n");
+  assert.equal(headers.get("accept"), "application/octet-stream");
+});
+
 for (const [status, fragment] of [
   [401, "authentication failed"],
   [403, "missing a required PAT scope"],

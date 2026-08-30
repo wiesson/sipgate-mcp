@@ -1,6 +1,23 @@
 # Changelog
 
 ## 0.5.0 - 2026-08-30
+- Add the final 32 tools for contacts, incoming blocklists, call/product
+  restrictions, history updates/deletes/CSV export, balance, portings,
+  account-wide sipgate.io settings, and webhook logs using the exact v2 paths,
+  verbs, query parameters, and request bodies.
+- Permit account-wide contact, blacklist, balance, porting, sipgate.io, and
+  webhook-log reads in user scope. Require `confirm_account_wide: true` for
+  account-wide contact/blacklist writes, sipgate.io updates in user scope, and
+  every porting cancellation.
+- Verify every single and bulk history mutation against owned history entries.
+  When user scope requests bulk deletion without IDs, enumerate both archived
+  and unarchived entries through owned connection IDs and send only those IDs;
+  never issue an unconstrained account-wide `DELETE /history`.
+- Return `{before, after}` for all new mutations, including explicit
+  no-read-back/deletion notes. Mark contact CSV import, contact/history
+  deletion, and porting cancellation as destructive or irreversible.
+- Add raw-text transport for contact/history CSV exports and explicit
+  403/404-unavailable results for sipgate.io settings and webhook logs.
 - Add 35 phoneline, voicemail/greeting, automated-recording, and faxline-
   configuration tools covering every requested GET/POST/PUT/DELETE operation,
   with exact v2 paths and payloads.
@@ -22,8 +39,8 @@
   mutation. An available but empty phoneline collection still denies access.
 - Warn that voicemail call sessions and recording features may incur charges,
   and that callers remain responsible for legally required recording consent.
-- Expand read-only registration to 33 read tools and the full write-enabled
-  surface to 97 tools. Add one definition and backend endpoint test per new
+- Expand read-only registration to 47 read tools and the full write-enabled
+  surface to 129 tools. Add one definition and backend endpoint test per new
   tool plus foreign-resource and phoneline-less access-policy coverage.
 - Add notification listing, creation, and deletion for call email/SMS, fax
   email/SMS/report, incoming-SMS email, and voicemail email/SMS targets.
@@ -79,7 +96,7 @@
 - Return `{before, after}` for all mutations, with explicit no-read-back notes
   for creates and deletes. Redact credential containers and the one-time
   password returned by device password rotation.
-- Expand read-only mode from seven to 33 read tools; write tools are never
+- Expand read-only mode from seven to 47 read tools; write tools are never
   registered in read-only mode.
 - Bump the package, CLI, and setup skill to version 0.5.0.
 
