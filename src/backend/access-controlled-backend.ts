@@ -442,7 +442,9 @@ export class AccessControlledBackend implements TelephonyBackend {
 
   public async getCallHistory(query: HistoryQuery): Promise<JsonValue> {
     if (this.scope === "account") return this.delegate.getCallHistory(query);
-    const connectionIds = await this.ownedConnectionIds();
+    // sipgate rejects device IDs as history connection filters with HTTP 403.
+    // Only real extensions (phonelines, faxlines, SMS) are accepted there.
+    const connectionIds = await this.ownedHistoryConnectionIds();
     const requested = query.connectionIds;
     if (requested) {
       for (const connectionId of requested) {
@@ -450,18 +452,22 @@ export class AccessControlledBackend implements TelephonyBackend {
       }
     }
     const scopedConnectionIds = requested ?? [...connectionIds];
-    if (scopedConnectionIds.length === 0) {
-      return {
-        items: [],
-        pagination: {
-          offset: query.offset,
-          limit: query.limit,
-          totalCount: 0,
-          nextOffset: null,
-        },
-      };
+    if (scopedConnectionIds.length > 0) {
+      return this.delegate.getCallHistory({ ...query, connectionIds: scopedConnectionIds });
     }
-    return this.delegate.getCallHistory({ ...query, connectionIds: scopedConnectionIds });
+    // An account without filterable extensions would otherwise report an empty
+    // history. Read it unfiltered and keep only what belongs to the user.
+    const numbers = await this.ownedNumbers();
+    const { connectionIds: _ignored, ...unfiltered } = query;
+    const response = await this.delegate.getCallHistory(unfiltered);
+    const object = asObject(response);
+    const owned = items(response).filter((entry) => this.isOwnedHistoryEntry(entry, numbers));
+    return {
+      ...(object ?? {}),
+      items: owned,
+      filteredBy: "owned phone numbers",
+      note: "This account has no history extensions to filter on, so the account history was filtered by the user's own numbers.",
+    };
   }
 
   public async exportHistory(query: HistoryExportQuery): Promise<JsonValue> {
@@ -523,6 +529,11 @@ export class AccessControlledBackend implements TelephonyBackend {
     this.assertUser(userId);
     if (this.scope === "user") await this.assertOwnedFaxline(faxlineId);
     return this.delegate.getFaxlineCallerId(userId, faxlineId);
+  }
+
+  public listSmsExtensions(userId: string): Promise<JsonValue> {
+    this.assertUser(userId);
+    return this.delegate.listSmsExtensions(this.scope === "account" ? userId : this.context.userId);
   }
 
   public async getHistoryEntry(entryId: string): Promise<JsonValue> {
@@ -1397,6 +1408,12 @@ export class AccessControlledBackend implements TelephonyBackend {
       ? entry.connectionIds.filter((value): value is string => typeof value === "string")
       : [];
     if (entryConnections.some((connectionId) => connectionIds.has(connectionId))) return;
+    // Accounts without extensions produce entries that carry no owned
+    // connection, so fall back to the numbers the entry was placed between.
+    if (entry !== undefined) {
+      const numbers = await this.ownedNumbers();
+      if (this.isOwnedHistoryEntry(entry, numbers)) return;
+    }
     throw new AccessPolicyError(
       "User scope does not permit access to the requested history entry.",
     );
@@ -1414,15 +1431,14 @@ export class AccessControlledBackend implements TelephonyBackend {
 
   private async ownedHistoryEntryIds(): Promise<string[]> {
     try {
-      const connectionIds = [...await this.ownedConnectionIds()];
-      if (connectionIds.length === 0) return [];
       const found = new Set<string>();
       const pageSize = 1000;
       for (const archived of [false, true]) {
         for (let offset = 0; ; offset += pageSize) {
-          const response = await this.delegate.getCallHistory({
+          // Route through the scoped reader so device IDs never reach sipgate
+          // as connection filters and unfilterable accounts still enumerate.
+          const response = await this.getCallHistory({
             archived,
-            connectionIds,
             limit: pageSize,
             offset,
             types: ["CALL", "VOICEMAIL", "SMS", "FAX"],
@@ -1523,6 +1539,31 @@ export class AccessControlledBackend implements TelephonyBackend {
     const phoneNumber = stringField(owner, "phoneNumber");
     return (participantId !== undefined && deviceIds.has(participantId))
       || (phoneNumber !== undefined && numbers.phoneNumbers.has(phoneNumber));
+  }
+
+  private isOwnedHistoryEntry(entry: JsonObject, numbers: OwnedNumbers): boolean {
+    const source = stringField(entry, "source");
+    const target = stringField(entry, "target");
+    return (source !== undefined && numbers.phoneNumbers.has(source))
+      || (target !== undefined && numbers.phoneNumbers.has(target));
+  }
+
+  private async ownedSmsExtensionIds(): Promise<Set<string>> {
+    const response = await this.delegate.listSmsExtensions(this.context.userId);
+    return new Set(
+      items(response)
+        .map((extension) => stringField(extension, "id"))
+        .filter((id): id is string => Boolean(id)),
+    );
+  }
+
+  private async ownedHistoryConnectionIds(): Promise<Set<string>> {
+    const [phonelineIds, faxlineIds, smsIds] = await Promise.all([
+      this.ownedPhonelineIds(),
+      this.ownedFaxlineIds(),
+      this.ownedSmsExtensionIds(),
+    ]);
+    return new Set([...phonelineIds, ...faxlineIds, ...smsIds]);
   }
 
   private async ownedPhonelineIds(): Promise<Set<string>> {

@@ -306,6 +306,7 @@ export interface TelephonyBackend {
   getCallHistory(query: HistoryQuery): Promise<JsonValue>;
   exportHistory(query: HistoryExportQuery): Promise<JsonValue>;
   getHistoryEntry(entryId: string): Promise<JsonValue>;
+  listSmsExtensions(userId: string): Promise<JsonValue>;
   listCalls(): Promise<JsonValue>;
   listNotifications(userId: string): Promise<JsonValue>;
   listFaxlines(userId: string): Promise<JsonValue>;

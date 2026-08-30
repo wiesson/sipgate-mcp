@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.2 - 2026-08-30
+
+- Never send device IDs as history connection filters. sipgate answers HTTP 403
+  for them and accepts only real extensions, so `call_history` failed on every
+  account whose user owns devices but no phoneline. Accounts with no filterable
+  extension now read the history unfiltered and keep the entries that match the
+  user's own numbers.
+- Pass through sipgate's own plain-text denial reason. The phoneline endpoints
+  answer "This endpoint requires a sipgate Classic PBX Account", which is worth
+  more than any guess about token scopes. Structured bodies are still withheld.
+
 ## 0.5.1 - 2026-08-30
 
 - List user numbers from sipgate's own user-number endpoint instead of matching

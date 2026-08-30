@@ -28,7 +28,25 @@ export class SipgateApiError extends Error {
   }
 }
 
-function errorForStatus(status: number, retryAfter: string | null, path: string): SipgateApiError {
+/**
+ * sipgate explains some denials in a short plain-text body, for example
+ * "This endpoint requires a sipgate Classic PBX Account". That sentence is far
+ * more useful than any guess, so it is passed through when it is plainly a
+ * static message and cannot be echoed request data.
+ */
+const SAFE_API_MESSAGE = /^[A-Za-z0-9 ,.'()\-]{1,200}$/;
+
+function apiMessage(body: string): string {
+  const trimmed = body.trim();
+  return SAFE_API_MESSAGE.test(trimmed) ? ` sipgate says: ${trimmed}` : "";
+}
+
+function errorForStatus(
+  status: number,
+  retryAfter: string | null,
+  path: string,
+  body: string,
+): SipgateApiError {
   switch (status) {
     case 401:
       return new SipgateApiError(
@@ -37,7 +55,7 @@ function errorForStatus(status: number, retryAfter: string | null, path: string)
       );
     case 403:
       return new SipgateApiError(
-        `sipgate denied ${path} (HTTP 403). The Personal Access Token may be missing a required PAT scope for it, or the account may not include this feature. Other endpoints can still work, so check the token's scopes for this one specifically.`,
+        `sipgate denied ${path} (HTTP 403).${apiMessage(body)} The Personal Access Token may be missing a required PAT scope for it, or the account may not include this feature. Other endpoints can still work, so check the token's scopes for this one specifically.`,
         status,
       );
     case 404:
@@ -119,7 +137,8 @@ export class SipgateClient {
     }
 
     if (!response.ok) {
-      throw errorForStatus(response.status, response.headers.get("retry-after"), url.pathname);
+      const body = await response.text().catch(() => "");
+      throw errorForStatus(response.status, response.headers.get("retry-after"), url.pathname, body);
     }
     return response;
   }
