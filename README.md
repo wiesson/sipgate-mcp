@@ -2,7 +2,9 @@
 
 `sipgate-mcp` is an open-source, self-hosted Model Context Protocol server for inspecting and configuring a sipgate account. It exposes the sipgate REST API v2 as focused tools for agents such as Claude Code, Claude Desktop, and Codex.
 
-The server uses stdio only. It does not start an HTTP server, proxy credentials, or send credentials anywhere except directly to `https://api.sipgate.com/v2`.
+The server uses stdio only. It does not start an HTTP server or route credentials
+through a third-party service. It sends authentication only from the local MCP
+process directly to `https://api.sipgate.com/v2`.
 
 ## Requirements
 
@@ -10,15 +12,27 @@ The server uses stdio only. It does not start an HTTP server, proxy credentials,
 - A sipgate account with a Personal Access Token (PAT)
 - An MCP client with stdio support
 
-Run the published package with:
+After the first npm release, install the command globally with any of the
+supported package managers:
+
+```bash
+npm install --global sipgate-mcp
+pnpm add --global sipgate-mcp
+vp install --global sipgate-mcp
+```
+
+Then start it with:
 
 ```bash
 export SIPGATE_TOKEN_ID="your-token-id"
 export SIPGATE_TOKEN="your-token"
-npx -y sipgate-mcp
+sipgate-mcp
 ```
 
-The package name was available when this project was prepared. This repository is configured for `sipgate-mcp`, but it has not been published.
+For clients that manage MCP commands on demand, `npx -y sipgate-mcp` remains
+supported without a global installation. The package name was available when
+checked on 2026-08-30; this repository is configured for `sipgate-mcp`, but the
+initial npm publish still needs to be completed.
 
 ## Create a Personal Access Token
 
@@ -171,6 +185,17 @@ npm test
 ```
 
 Tests use `node:test` and mocked `fetch`; they never call the real sipgate API. The suite includes client authentication/error behavior, exact critical write payloads, credential redaction, one test per MCP tool, and read-only registration.
+
+## Releases
+
+Normal CI tests Node.js 22 and 24. Publishing a GitHub Release whose tag matches
+the version in `package.json` triggers an npm publish from a GitHub-hosted runner.
+The release workflow uses npm Trusted Publishing with OpenID Connect, contains
+no long-lived npm token, and produces npm provenance automatically. Stable
+GitHub Releases publish under npm's `latest` tag; GitHub prereleases use `next`.
+
+Maintainer setup and the one-time first-publish procedure are documented in
+[RELEASING.md](RELEASING.md).
 
 ## API provenance and limitations
 
