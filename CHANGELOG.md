@@ -1,6 +1,15 @@
 # Changelog
 
 ## 0.5.0 - 2026-08-30
+- Keep a shared emergency address from leaking or rewriting other users' data:
+  user scope filters foreign numbers out of an address's number list and
+  refuses to edit an address that other users' numbers are attached to.
+- Establish number ownership from the direct user-number endpoint as well as
+  routing, so quick dials that no phoneline or device routes can still be
+  updated and deleted by their owner.
+- Page through every owned number when deciding ownership instead of stopping
+  after 1000.
+- Redact PUK and ICCID values that arrive outside a credentials wrapper.
 
 - Add complete self-service tools for the requested sipgate v2 device surface:
   device reads, updates and deletion; aliases; caller ID; local prefix; tariff

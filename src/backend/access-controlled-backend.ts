@@ -193,8 +193,15 @@ export class AccessControlledBackend implements TelephonyBackend {
   }
 
   public async listAddressNumbers(addressId: number): Promise<JsonValue> {
-    if (this.scope === "user") await this.assertOwnedAddress(addressId);
-    return this.delegate.listAddressNumbers(addressId);
+    if (this.scope === "account") return this.delegate.listAddressNumbers(addressId);
+    await this.assertOwnedAddress(addressId);
+    // An address can be shared with numbers belonging to other users. Ownership
+    // of one number must not expose the rest of them.
+    const numbers = await this.ownedNumbers();
+    const response = await this.delegate.listAddressNumbers(addressId);
+    return {
+      items: items(response).filter((number) => this.isOwnedNumber(number, numbers)),
+    };
   }
 
   public validateQuickDialNumber(quickDialNumber: string): Promise<JsonValue> {
@@ -417,7 +424,10 @@ export class AccessControlledBackend implements TelephonyBackend {
     addressId: number,
     input: AddressUpdateInput,
   ): Promise<MutationResult> {
-    if (this.scope === "user") await this.assertOwnedAddress(addressId);
+    if (this.scope === "user") {
+      await this.assertOwnedAddress(addressId);
+      await this.assertExclusivelyOwnedAddress(addressId);
+    }
     return this.delegate.updateAddress(addressId, input);
   }
 
@@ -609,12 +619,45 @@ export class AccessControlledBackend implements TelephonyBackend {
     return owned;
   }
 
-  private async ownedNumbers(): Promise<OwnedNumbers> {
-    const numbersResponse = await this.delegate.listUserNumbers(
-      this.context.userId,
-      { offset: 0, limit: 1000 },
+  private isOwnedNumber(number: JsonObject, numbers: OwnedNumbers): boolean {
+    const numberId = stringField(number, "id");
+    const phoneNumber = stringField(number, "number");
+    return (numberId !== undefined && numbers.numberIds.has(numberId))
+      || (phoneNumber !== undefined && numbers.phoneNumbers.has(phoneNumber));
+  }
+
+  /**
+   * Editing an address rewrites it for every number attached to it, so a
+   * user-scope write is only safe when the user owns all of them.
+   */
+  private async assertExclusivelyOwnedAddress(addressId: number): Promise<void> {
+    const [numbers, response] = await Promise.all([
+      this.ownedNumbers(),
+      this.delegate.listAddressNumbers(addressId),
+    ]);
+    const attached = items(response);
+    const foreign = attached.filter((number) => !this.isOwnedNumber(number, numbers));
+    if (foreign.length === 0) return;
+    throw new AccessPolicyError(
+      "User scope does not permit editing an address that is shared with numbers of other users.",
     );
-    const numbers = items(numbersResponse);
+  }
+
+  private async ownedNumbers(): Promise<OwnedNumbers> {
+    const pageSize = 1000;
+    const routed: JsonObject[] = [];
+    for (let offset = 0; ; offset += pageSize) {
+      const page = items(await this.delegate.listUserNumbers(
+        this.context.userId,
+        { offset, limit: pageSize },
+      ));
+      routed.push(...page);
+      if (page.length < pageSize) break;
+    }
+    // Quick dials and other number types are listed by the direct user-number
+    // endpoint but may never appear in phoneline or device routing.
+    const direct = items(await this.delegate.getUserNumbers(this.context.userId));
+    const numbers = [...routed, ...direct];
     return {
       numberIds: new Set(
         numbers.map((number) => stringField(number, "id")).filter((id): id is string => Boolean(id)),

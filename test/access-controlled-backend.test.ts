@@ -527,3 +527,85 @@ test("user-scoped mutations fail closed with AccessPolicyError when ownership ca
     postcode: "40219",
   }), AccessPolicyError);
 });
+
+test("user scope hides foreign numbers attached to a shared address", async () => {
+  const delegate = new FakeBackend();
+  delegate.listAddressNumbers = async (addressId: number): Promise<JsonValue> => {
+    delegate.calls.push({ method: "listAddressNumbers", args: [addressId] });
+    return {
+      items: [
+        { id: "n0", number: "+49211123456" },
+        { id: "n9", number: "+49211999999" },
+      ],
+    };
+  };
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  const result = await backend.listAddressNumbers(123) as { items: JsonValue[] };
+
+  assert.deepEqual(result.items, [{ id: "n0", number: "+49211123456" }]);
+});
+
+test("user scope refuses to edit an address shared with foreign numbers", async () => {
+  const delegate = new FakeBackend();
+  delegate.listAddressNumbers = async (addressId: number): Promise<JsonValue> => {
+    delegate.calls.push({ method: "listAddressNumbers", args: [addressId] });
+    return {
+      items: [
+        { id: "n0", number: "+49211123456" },
+        { id: "n9", number: "+49211999999" },
+      ],
+    };
+  };
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await assert.rejects(
+    backend.updateAddress(123, { city: "Kiel", countrycode: "DE", postcode: "24103" }),
+    AccessPolicyError,
+  );
+  assert.equal(delegate.calls.some((call) => call.method === "updateAddress"), false);
+});
+
+test("user scope edits an address whose numbers are all owned", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await backend.updateAddress(123, { city: "Kiel", countrycode: "DE", postcode: "24103" });
+
+  assert.equal(delegate.calls.some((call) => call.method === "updateAddress"), true);
+});
+
+test("user scope owns quick dials that only the direct number endpoint lists", async () => {
+  const delegate = new FakeBackend();
+  delegate.getUserNumbers = async (userId: string): Promise<JsonValue> => {
+    delegate.calls.push({ method: "getUserNumbers", args: [userId] });
+    return { items: [{ id: "q0", number: "**11", type: ["QUICKDIAL"] }] };
+  };
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await backend.updateQuickDial("q0", { userId: "w0", quickDialNumber: "**12" });
+
+  assert.equal(delegate.calls.some((call) => call.method === "updateQuickDial"), true);
+});
+
+test("user scope pages through every owned number before deciding ownership", async () => {
+  const delegate = new FakeBackend();
+  const firstPage = Array.from({ length: 1000 }, (_, index) => ({
+    id: `n${index}`,
+    number: `+4921100${index}`,
+  }));
+  delegate.listUserNumbers = async (
+    userId: string,
+    input: PaginationInput,
+  ): Promise<JsonValue> => {
+    delegate.calls.push({ method: "listUserNumbers", args: [userId, input] });
+    return {
+      items: input.offset === 0 ? firstPage : [{ id: "n1000", number: "+49211001000" }],
+    };
+  };
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await backend.setNumberRouting("n1000", "e0");
+
+  assert.equal(delegate.calls.some((call) => call.method === "setUserNumberRouting"), true);
+});

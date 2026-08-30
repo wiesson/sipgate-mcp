@@ -675,3 +675,17 @@ test("SipgateBackend implements delete_quick_dial with a before snapshot", async
   assert.equal(new URL(requests[1]?.url ?? "").pathname, "/v2/numbers/quickdial/n0");
   assert.equal(requests[1]?.method, "DELETE");
 });
+
+test("SipgateBackend redacts SIM secrets that arrive outside a credentials wrapper", async () => {
+  const { backend } = backendWithResponses([
+    { id: "y0", puk1: "12345", puk2: "67890", iccid: "8949", simId: "1234567" },
+    null,
+    { id: "y0" },
+  ]);
+
+  const result = await backend.setDnd("y0", true) as { before: Record<string, unknown> };
+
+  assert.equal(result.before.puk1, "[REDACTED]");
+  assert.equal(result.before.puk2, "[REDACTED]");
+  assert.equal(result.before.iccid, "[REDACTED]");
+});

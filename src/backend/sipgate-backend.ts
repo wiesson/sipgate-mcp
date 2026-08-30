@@ -20,7 +20,7 @@ interface ItemsResponse {
   totalCount?: number;
 }
 
-const SENSITIVE_KEY = /authorization|credential|password|secret|token/i;
+const SENSITIVE_KEY = /authorization|credential|password|secret|token|puk\d?|iccid/i;
 
 function sanitize(value: unknown): JsonValue {
   if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {

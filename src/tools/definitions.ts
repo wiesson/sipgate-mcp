@@ -174,7 +174,7 @@ export function createToolDefinitions(
     }),
     define({
       name: "validate_quick_dial",
-      description: "Check whether a quick-dial number is already taken in the sipgate account.",
+      description: "Check whether a quick-dial number is already taken. The check covers the whole sipgate account, including quick dials of other users.",
       schema: z.object({ quick_dial_number: swaggerString.describe("Quick-dial number, for example 42") }),
       annotations: readAnnotations,
       execute: async ({ quick_dial_number }) => backend.validateQuickDialNumber(quick_dial_number),
