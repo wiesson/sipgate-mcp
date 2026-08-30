@@ -12,8 +12,9 @@
   sessions. Global results are filtered to voicemail IDs discovered under the
   authenticated user's phonelines.
 - Add automated call-recording announcement and per-extension settings. User
-  scope accepts settings only for an owned phoneline or faxline extension and
-  verifies the current announcement ID before deletion.
+  scope accepts settings only for an owned phoneline or faxline extension. The
+  account-global announcement has no user ownership link, so its read/create/
+  delete operations require administrator account scope.
 - Add faxline creation, alias/deletion, caller-ID reads/writes, and tagline
   updates with owned-faxline and owned-caller-number checks.
 - Return explicit `phonelinesAvailable: false` / `changed: false` results for

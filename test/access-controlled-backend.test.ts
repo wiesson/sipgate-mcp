@@ -611,6 +611,9 @@ test("account scope requires an administrator and preserves account-wide operati
   const backend = await createAccessControlledBackend(administrator, "account");
   await backend.listDevices();
   await backend.getRouting("w1");
+  await backend.listAutorecordingGreetings();
+  await backend.createAutorecordingGreeting({ filename: "notice.mp3" });
+  await backend.deleteAutorecordingGreeting("ag0");
 
   assert.equal(administrator.calls.some((call) =>
     call.method === "getUser" && call.args[0] === "w0"), true);
@@ -618,6 +621,12 @@ test("account scope requires an administrator and preserves account-wide operati
     call.method === "listDevices" && call.args[0] === undefined), true);
   assert.equal(administrator.calls.some((call) =>
     call.method === "getRouting" && call.args[0] === "w1"), true);
+  assert.equal(administrator.calls.some((call) =>
+    call.method === "listAutorecordingGreetings"), true);
+  assert.equal(administrator.calls.some((call) =>
+    call.method === "createAutorecordingGreeting"), true);
+  assert.equal(administrator.calls.some((call) =>
+    call.method === "deleteAutorecordingGreeting"), true);
 });
 
 test("user scope scopes call history to devices when the account has no phonelines", async () => {
@@ -1059,6 +1068,14 @@ test("user scope rejects foreign nested recording and forwarding resources", asy
   );
   await assert.rejects(backend.deleteAutorecordingGreeting("ag9"), AccessPolicyError);
   await assert.rejects(
+    async () => backend.listAutorecordingGreetings(),
+    AccessPolicyError,
+  );
+  await assert.rejects(
+    async () => backend.createAutorecordingGreeting({ filename: "notice.mp3" }),
+    AccessPolicyError,
+  );
+  await assert.rejects(
     backend.playVoicemail({ deviceId: "e0", dataId: "foreign-history" }),
     AccessPolicyError,
   );
@@ -1070,6 +1087,8 @@ test("user scope rejects foreign nested recording and forwarding resources", asy
     "updateParallelForwarding",
     "deleteParallelForwarding",
     "deleteAutorecordingGreeting",
+    "listAutorecordingGreetings",
+    "createAutorecordingGreeting",
     "playVoicemail",
     "setFaxlineCallerId",
   ].includes(call.method)), false);

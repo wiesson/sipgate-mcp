@@ -35,6 +35,9 @@ Run only one install command. Confirm that `sipgate-mcp --version` reports
 - Keep setup user-scoped. Let the setup prompt decide read-only versus write
   tools, and do not pass `--allow-writes` on the user's behalf. Never enable
   account-wide administrator access without an explicit user request.
+- The automated-recording greeting is account-global and intentionally fails
+  closed in user scope; its read/create/delete tools require explicitly
+  requested administrator account scope.
 - User scope remains the resource boundary for write tools: device IDs,
   phone-number IDs, emergency-address IDs, notification IDs, live-call
   participants, phonelines, nested parallel forwardings, voicemails and

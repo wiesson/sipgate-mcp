@@ -290,6 +290,11 @@ export class AccessControlledBackend implements TelephonyBackend {
   }
 
   public listAutorecordingGreetings(): Promise<JsonValue> {
+    if (this.scope === "user") {
+      throw new AccessPolicyError(
+        "User scope cannot access the account-wide automated-recording greeting because it has no user ownership relationship. Use administrator account scope.",
+      );
+    }
     return this.delegate.listAutorecordingGreetings();
   }
 
@@ -725,34 +730,19 @@ export class AccessControlledBackend implements TelephonyBackend {
   }
 
   public createAutorecordingGreeting(input: GreetingUploadInput): Promise<MutationResult> {
+    if (this.scope === "user") {
+      throw new AccessPolicyError(
+        "User scope cannot change the account-wide automated-recording greeting because it has no user ownership relationship. Use administrator account scope.",
+      );
+    }
     return this.delegate.createAutorecordingGreeting(input);
   }
 
   public async deleteAutorecordingGreeting(greetingId: string): Promise<MutationResult> {
     if (this.scope === "user") {
-      let greeting: JsonObject | undefined;
-      try {
-        greeting = asObject(await this.delegate.listAutorecordingGreetings());
-      } catch {
-        throw new AccessPolicyError(
-          "User scope could not establish ownership of the automated-recording greeting.",
-        );
-      }
-      if (greeting?.autorecordingsAvailable === false) {
-        return {
-          before: null,
-          after: {
-            changed: false,
-            autorecordingsAvailable: false,
-            note: "Automated call recording is not activated; no change was attempted.",
-          },
-        };
-      }
-      if (stringField(greeting ?? {}, "id") !== greetingId) {
-        throw new AccessPolicyError(
-          "User scope does not permit access to the requested automated-recording greeting.",
-        );
-      }
+      throw new AccessPolicyError(
+        "User scope cannot delete the account-wide automated-recording greeting because it has no user ownership relationship. Use administrator account scope.",
+      );
     }
     return this.delegate.deleteAutorecordingGreeting(greetingId);
   }

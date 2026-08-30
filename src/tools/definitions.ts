@@ -378,7 +378,7 @@ export function createToolDefinitions(
     }),
     define({
       name: "list_autorecording_greetings",
-      description: "Get the current automated call-recording announcement. Call recording may incur charges; the caller is responsible for obtaining every participant's consent.",
+      description: "Get the account-wide automated call-recording announcement. This resource has no user ownership link and therefore requires administrator account scope. Call recording may incur charges; the caller is responsible for obtaining every participant's consent.",
       schema: z.object({}),
       annotations: readAnnotations,
       execute: async () => backend.listAutorecordingGreetings(),
@@ -690,7 +690,7 @@ export function createToolDefinitions(
     }),
     define({
       name: "create_autorecording_greeting",
-      description: `${changeWarning} replace the automated call-recording announcement. Call recording may incur charges; the caller is responsible for obtaining every participant's consent. Returns before/after greeting state.`,
+      description: `${changeWarning} replace the account-wide automated call-recording announcement. This resource has no user ownership link and therefore requires administrator account scope. Call recording may incur charges; the caller is responsible for obtaining every participant's consent. Returns before/after greeting state.`,
       schema: z.object({
         base64_content: z.string().max(15_000_000).optional(),
         filename: swaggerString.optional(),
@@ -703,7 +703,7 @@ export function createToolDefinitions(
     }),
     define({
       name: "delete_autorecording_greeting",
-      description: `${changeWarning} delete the current automated call-recording announcement after verifying its ID. Call recording may incur charges; the caller is responsible for obtaining every participant's consent. Returns previous state and a deletion marker.`,
+      description: `${changeWarning} delete the account-wide automated call-recording announcement. This resource has no user ownership link and therefore requires administrator account scope. Call recording may incur charges; the caller is responsible for obtaining every participant's consent. Returns previous state and a deletion marker.`,
       schema: z.object({ greeting_id: id }),
       annotations: writeAnnotations,
       execute: async ({ greeting_id }) => backend.deleteAutorecordingGreeting(greeting_id),
