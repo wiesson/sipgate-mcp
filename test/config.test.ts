@@ -35,3 +35,32 @@ test("loadConfig rejects unknown access scopes", () => {
     /SIPGATE_MCP_SCOPE/,
   );
 });
+
+test("loadConfig falls back to stored credentials", () => {
+  assert.deepEqual(loadConfig({}, () => ({
+    tokenId: "stored-id",
+    token: "stored-token",
+  })), {
+    accessScope: "user",
+    tokenId: "stored-id",
+    token: "stored-token",
+    readonly: false,
+  });
+});
+
+test("loadConfig does not mix partial environment and stored credentials", () => {
+  assert.throws(
+    () => loadConfig({ SIPGATE_TOKEN_ID: "environment-id" }, () => ({
+      tokenId: "stored-id",
+      token: "stored-token",
+    })),
+    /Credentials are missing/,
+  );
+});
+
+test("loadConfig reports missing environment and stored credentials", () => {
+  assert.throws(
+    () => loadConfig({}, () => undefined),
+    /sipgate-mcp setup/,
+  );
+});

@@ -2,13 +2,24 @@
 
 `sipgate-mcp` is an open-source, self-hosted Model Context Protocol server for inspecting and configuring a sipgate account. It exposes the sipgate REST API v2 as focused tools for agents such as Claude Code, Claude Desktop, and Codex.
 
-Version 0.2 defaults to user-scoped access: tools are constrained to the
+Version 0.2 and later default to user-scoped access: tools are constrained to the
 authenticated sipgate user's resources. Account-wide access is an explicit
 administrator-only mode.
 
 The server uses stdio only. It does not start an HTTP server or route credentials
 through a third-party service. It sends authentication only from the local MCP
 process directly to `https://api.sipgate.com/v2`.
+
+## Agent-assisted setup
+
+Tell Codex or Claude:
+
+> Set up sipgate MCP by following
+> https://raw.githubusercontent.com/wiesson/sipgate-mcp/main/SKILL.md
+
+The linked, versioned [`SKILL.md`](SKILL.md) tells the agent how to install and
+verify the matching package without asking for credentials in chat. Secret
+entry remains an interactive local Keychain step controlled by the user.
 
 ## Requirements
 
@@ -24,13 +35,37 @@ pnpm add --global sipgate-mcp
 vp install --global sipgate-mcp
 ```
 
-Then start it with:
+On macOS, run the interactive setup once:
 
 ```bash
-export SIPGATE_TOKEN_ID="your-token-id"
-export SIPGATE_TOKEN="your-token"
+sipgate-mcp setup
+```
+
+The setup stores the PAT token ID and token in macOS Keychain without placing
+either value in shell history or an MCP configuration file. It registers every
+installed supported client (Codex and Claude Code) in user/read-only mode.
+Those clients start and stop the stdio server automatically; `sipgate-mcp` does
+not run as a daemon and does not need to be started manually.
+
+Use `sipgate-mcp setup --client codex` or `--client claude` to configure only
+one client. Add `--allow-writes` only when agent-initiated account changes are
+deliberately wanted. `--dry-run` prints the secret-free registration commands
+without changing the Keychain or client configuration.
+
+Secure interactive storage currently supports macOS. Environment variables
+remain available for Linux, Windows, containers, CI, and password-manager
+wrappers. To avoid putting literal credentials in shell history, read them
+interactively:
+
+```bash
+printf "sipgate PAT token ID: "
+IFS= read -r SIPGATE_TOKEN_ID
+printf "sipgate PAT token: "
+IFS= read -rs SIPGATE_TOKEN
+printf "\n"
+export SIPGATE_TOKEN_ID SIPGATE_TOKEN
 export SIPGATE_MCP_SCOPE="user"
-sipgate-mcp
+export SIPGATE_MCP_READONLY="1"
 ```
 
 For clients that manage MCP commands on demand, `npx -y sipgate-mcp` remains
@@ -41,11 +76,20 @@ supported without a global installation.
 1. Open [sipgate Personal Access Tokens](https://app.sipgate.com/personal-access-token).
 2. Select **Add token**, give the token a recognizable name, and select the scopes needed for the tools you intend to use.
 3. Copy both the token ID and token. sipgate displays the token itself only once.
-4. Put them in the environment as `SIPGATE_TOKEN_ID` and `SIPGATE_TOKEN` before starting your MCP client.
+4. Run `sipgate-mcp setup` on macOS, or provide them as `SIPGATE_TOKEN_ID` and `SIPGATE_TOKEN` in the MCP process environment.
 
 sipgate PAT authentication uses HTTP Basic Auth with `token-id:token` as the credential pair. `sipgate-mcp` constructs that header in memory. See sipgate's [authentication guide](https://en.sipgate.io/rest-api/authentication).
 
-Do not put either value in this repository, an MCP config committed to source control, command output, or an issue report.
+Do not put either value in this repository, an MCP config committed to source control, shell command arguments, command output, or an issue report.
+
+The separate **API Clients** screen in the sipgate account creates OAuth 2.0
+client credentials for an application that redirects users through sipgate's
+authorization flow. Those client credentials are not PAT replacements and are
+not used by the local stdio setup. They are relevant to a future hosted/remote
+MCP, which would need a registered redirect URI, user consent, access-token
+refresh, and secure per-user token storage. See sipgate's [OAuth authentication
+flow](https://en.sipgate.io/rest-api/authentication#oauth2) and [API client
+management](https://en.sipgate.io/rest-api/managing-third-party-clients).
 
 ## MCP access scopes
 
@@ -116,7 +160,10 @@ npx -y sipgate-mcp
 
 ## MCP client configuration
 
-Set `SIPGATE_TOKEN_ID` and `SIPGATE_TOKEN` in the environment that launches the MCP client. The examples keep secret values out of configuration files.
+The recommended macOS path is `sipgate-mcp setup`. The following manual
+examples are useful for other platforms and custom launchers. Set
+`SIPGATE_TOKEN_ID` and `SIPGATE_TOKEN` in the environment that launches the MCP
+client; the examples keep secret values out of configuration files.
 
 ### Claude Code
 
@@ -205,7 +252,11 @@ MCP stdio server
 
 ## Security
 
-- PAT values are read only from `SIPGATE_TOKEN_ID` and `SIPGATE_TOKEN`.
+- PAT values are read from `SIPGATE_TOKEN_ID` and `SIPGATE_TOKEN`, or from the
+  current user's macOS Keychain when both variables are absent.
+- `sipgate-mcp setup` delegates secret entry directly to the macOS Keychain
+  prompt. Secret values are never passed as command-line arguments and are not
+  written to Codex or Claude configuration.
 - User scope is the default and validates user IDs plus number, phoneline, device, call, and history ownership before delegation.
 - Account scope fails startup unless the authenticated sipgate user reports `admin: true`.
 - The Basic Auth header exists only in memory and is sent only to the fixed sipgate API base URL.

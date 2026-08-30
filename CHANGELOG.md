@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 - 2026-08-30
+
+- Add `sipgate-mcp setup` for interactive PAT storage in macOS Keychain.
+- Register installed Codex and Claude Code clients with a secret-free launch
+  command, user scope, and read-only mode by default.
+- Load Keychain credentials automatically when environment credentials are
+  absent, while keeping environment variables as an explicit override.
+- Add setup dry-run and opt-in write-mode flags.
+- Add a versioned agent skill and README bootstrap link for guided setup.
+- Add `sipgate-mcp --version` and verify that CLI, package, and skill versions
+  remain synchronized.
+
 ## 0.2.0 - 2026-08-30
 
 - Default to MCP-level user scope resolved from sipgate's authenticated user.
