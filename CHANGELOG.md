@@ -11,6 +11,11 @@
   `numbersAvailable`.
 - Scope user call history to device IDs when no phoneline IDs are available, so
   history is no longer silently empty or denied.
+- Accept an owned device as a routing destination in user scope. Numbers on
+  phoneline-less accounts point at a device, so the previous phoneline-only
+  check rejected every legitimate destination.
+- Read every page of account numbers instead of a single 1000-number page, so
+  ownership checks and pagination stay correct on large accounts.
 
 ## 0.3.1 - 2026-08-30
 

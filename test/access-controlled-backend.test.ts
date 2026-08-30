@@ -265,3 +265,28 @@ test("user scope scopes call history to devices when the account has no phonelin
   const query = historyCall?.args[0] as HistoryQuery;
   assert.deepEqual(query.connectionIds, ["e0"]);
 });
+
+test("user scope accepts an owned device as routing destination without phonelines", async () => {
+  const delegate = new FakeBackend();
+  delegate.routing = {
+    numbers: [{ id: "n0", number: "+49211123456", endpointId: "e0" }],
+    users: [{ userId: "w0", phonelines: [] }],
+  };
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await backend.setNumberRouting("n0", "e0");
+
+  assert.equal(delegate.calls.some((call) => call.method === "setUserNumberRouting"), true);
+});
+
+test("user scope still rejects a foreign routing destination", async () => {
+  const delegate = new FakeBackend();
+  delegate.routing = {
+    numbers: [{ id: "n0", number: "+49211123456", endpointId: "e0" }],
+    users: [{ userId: "w0", phonelines: [] }],
+  };
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await assert.rejects(backend.setNumberRouting("n0", "e9"), AccessPolicyError);
+  assert.equal(delegate.calls.some((call) => call.method === "setUserNumberRouting"), false);
+});

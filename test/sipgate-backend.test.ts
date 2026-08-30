@@ -293,7 +293,6 @@ test("SipgateBackend serves user numbers from devices when phonelines are unavai
     pagination: { offset: 0, limit: 10, returned: 2, totalCount: 2 },
     source: "devices",
     phonelinesAvailable: false,
-    numbersAvailable: true,
   });
   assert.deepEqual(requests.map((request) => new URL(request.url).pathname), [
     "/v2/w0/phonelines",
@@ -348,4 +347,41 @@ test("SipgateBackend falls back to device numbers for routing without phonelines
 
   assert.deepEqual(result.numbers, [{ id: "n0", number: "+49211123456", endpointId: "e0" }]);
   assert.equal(result.users[0]?.phonelinesAvailable, false);
+});
+
+test("SipgateBackend surfaces a denied numbers endpoint instead of returning nothing", async () => {
+  const { backend } = backendWithStatuses([
+    { status: 403 },
+    { body: { items: [{ id: "e0" }] } },
+    { status: 403 },
+  ]);
+
+  await assert.rejects(backend.listUserNumbers("w0", { offset: 0, limit: 10 }), /HTTP 403/);
+});
+
+test("SipgateBackend reads every page of account numbers for the device fallback", async () => {
+  const firstPage = Array.from({ length: 1000 }, (_, index) => ({
+    id: `n${index}`,
+    number: `+4921100${index}`,
+    endpointId: "e0",
+  }));
+  const { backend, requests } = backendWithStatuses([
+    { status: 403 },
+    { body: { items: [{ id: "e0" }] } },
+    { body: { items: firstPage, totalCount: 1001 } },
+    { body: { items: [{ id: "n1000", number: "+49211001000", endpointId: "e0" }], totalCount: 1001 } },
+  ]);
+
+  const result = await backend.listUserNumbers("w0", { offset: 1000, limit: 10 }) as {
+    items: JsonValue[];
+    pagination: { totalCount: number };
+  };
+
+  assert.equal(result.pagination.totalCount, 1001);
+  assert.deepEqual(result.items, [{ id: "n1000", number: "+49211001000", endpointId: "e0" }]);
+  const numberRequests = requests
+    .map((request) => new URL(request.url))
+    .filter((url) => url.pathname === "/v2/numbers")
+    .map((url) => url.searchParams.get("offset"));
+  assert.deepEqual(numberRequests, ["0", "1000"]);
 });

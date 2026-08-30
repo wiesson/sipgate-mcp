@@ -139,16 +139,38 @@ export class SipgateBackend implements TelephonyBackend {
    * Fallback for accounts without a phoneline layer: numbers are matched to the
    * user through the device their endpoint points at.
    */
+  private async listAllAccountNumbers(): Promise<JsonObject[]> {
+    const pageSize = 1000;
+    const all: JsonObject[] = [];
+    for (let offset = 0; ; offset += pageSize) {
+      const response = await this.client.request<JsonValue>("/numbers", {
+        query: { offset, limit: pageSize },
+      });
+      const page = asItems(response);
+      all.push(...page);
+      const envelope = response && !Array.isArray(response) && typeof response === "object"
+        ? response
+        : {};
+      const totalCount = typeof envelope.totalCount === "number" ? envelope.totalCount : undefined;
+      // sipgate may clamp the requested limit, so advance by what it actually
+      // returned and stop once a page comes back empty or the count is reached.
+      if (page.length === 0) break;
+      if (totalCount !== undefined && all.length >= totalCount) break;
+      if (page.length < pageSize) break;
+    }
+    return all;
+  }
+
   private async listDeviceNumbers(
     userId: string,
     { offset, limit }: PaginationInput,
     phonelinesAvailable: boolean,
   ): Promise<JsonValue> {
-    const [deviceIds, numbersResult] = await Promise.all([
+    const [deviceIds, accountNumbers] = await Promise.all([
       this.listDeviceIds(userId),
-      optional(this.client.request<JsonValue>("/numbers", { query: { offset: 0, limit: 1000 } })),
+      this.listAllAccountNumbers(),
     ]);
-    const owned = asItems(numbersResult.value).filter((number) => {
+    const owned = accountNumbers.filter((number) => {
       const endpointId = stringField(number, "endpointId");
       return endpointId !== undefined && deviceIds.has(endpointId);
     });
@@ -158,7 +180,6 @@ export class SipgateBackend implements TelephonyBackend {
       pagination: { offset, limit, returned: page.length, totalCount: owned.length },
       source: "devices",
       phonelinesAvailable,
-      numbersAvailable: numbersResult.available,
     });
   }
 
@@ -462,8 +483,8 @@ export class SipgateBackend implements TelephonyBackend {
   }
 
   private async findNumber(numberId: string): Promise<JsonObject> {
-    const response = await this.client.request<JsonValue>("/numbers", { query: { offset: 0, limit: 1000 } });
-    const number = asItems(response).find((item) => stringField(item, "id") === numberId);
+    const number = (await this.listAllAccountNumbers())
+      .find((item) => stringField(item, "id") === numberId);
     if (!number) throw new SipgateApiError("The requested sipgate phone number was not found.", 404);
     return number;
   }

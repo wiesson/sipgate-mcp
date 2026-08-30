@@ -145,12 +145,14 @@ export class AccessControlledBackend implements TelephonyBackend {
 
   public async setNumberRouting(numberId: string, endpointId: string): Promise<MutationResult> {
     if (this.scope === "user") {
-      const [numbers, phonelineIds] = await Promise.all([
+      // Accounts without a phoneline layer route numbers straight to a device,
+      // so an owned device is a legitimate destination endpoint.
+      const [numbers, endpointIds] = await Promise.all([
         this.ownedNumbers(),
-        this.ownedPhonelineIds(),
+        this.ownedConnectionIds(),
       ]);
       this.assertOwned(numbers.numberIds, numberId, "phone number");
-      this.assertOwned(phonelineIds, endpointId, "destination phoneline");
+      this.assertOwned(endpointIds, endpointId, "destination endpoint");
     }
     return this.scope === "user"
       ? this.delegate.setUserNumberRouting(this.context.userId, numberId, endpointId)
