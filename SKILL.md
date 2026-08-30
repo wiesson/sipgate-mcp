@@ -32,7 +32,8 @@ Run only one install command. Confirm that `sipgate-mcp --version` reports
   files, logs, or issue reports.
 - The local server uses a sipgate Personal Access Token. A sipgate OAuth API
   client ID and secret are not substitutes for this local setup.
-- Keep the first setup user-scoped and read-only. Do not enable write tools or
+- Keep setup user-scoped. Let the setup prompt decide read-only versus write
+  tools, and do not pass `--allow-writes` on the user's behalf. Never enable
   account-wide administrator access without an explicit user request.
 - Do not remove or replace an existing MCP configuration without the user's
   approval.

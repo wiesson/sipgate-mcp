@@ -16,6 +16,9 @@
   check rejected every legitimate destination.
 - Read every page of account numbers instead of a single 1000-number page, so
   ownership checks and pagination stay correct on large accounts.
+- Ask during interactive setup whether to register write tools instead of
+  silently defaulting to read-only. `--allow-writes` and the new `--read-only`
+  skip the question; a non-interactive run without either stays read-only.
 
 ## 0.3.1 - 2026-08-30
 
