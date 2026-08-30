@@ -82,6 +82,38 @@ function stringField(value: JsonObject, key: string): string | undefined {
   return typeof field === "string" ? field : undefined;
 }
 
+/**
+ * Account-wide writes are confirmed at the access boundary, but SipgateBackend
+ * is exported on its own, so the invariant is repeated here rather than trusted.
+ */
+function assertConfirmed(confirmed: boolean | undefined, action: string): void {
+  if (confirmed === true) return;
+  throw new SipgateApiError(
+    `Refusing to ${action} without an explicit account-wide confirmation.`,
+    400,
+  );
+}
+
+/**
+ * Webhook URLs routinely carry their authentication in the query string, and
+ * the log returns them as plain strings that key-based redaction cannot see.
+ */
+function stripUrlQueries(value: JsonValue): JsonValue {
+  if (typeof value === "string") {
+    const separator = value.indexOf("?");
+    return value.startsWith("http") && separator !== -1
+      ? `${value.slice(0, separator)}?[REDACTED]`
+      : value;
+  }
+  if (Array.isArray(value)) return value.map(stripUrlQueries);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, stripUrlQueries(child)]),
+    );
+  }
+  return value;
+}
+
 function encodeId(id: string): string {
   return encodeURIComponent(id);
 }
@@ -735,15 +767,18 @@ export class SipgateBackend implements TelephonyBackend {
     const { value, available, status } = await optional(
       this.client.request<JsonValue>("/log/webhooks"),
     );
-    return available
-      ? sanitize(value ?? { items: [] })
-      : unavailableFeature("the account-wide sipgate.io webhook log", status, true);
+    if (!available) {
+      return unavailableFeature("the account-wide sipgate.io webhook log", status, true);
+    }
+    const logs = sanitize(value ?? { items: [] });
+    return stripUrlQueries(logs);
   }
 
   public async createContact(
     input: ContactInput,
-    _confirmAccountWide?: boolean,
+    confirmAccountWide?: boolean,
   ): Promise<MutationResult> {
+    assertConfirmed(confirmAccountWide, "create an account-wide contact");
     const response = await this.client.request<JsonValue>("/contacts", {
       method: "POST",
       body: this.contactBody(input),
@@ -761,8 +796,9 @@ export class SipgateBackend implements TelephonyBackend {
   public async updateContact(
     contactId: string,
     input: ContactUpdateInput,
-    _confirmAccountWide?: boolean,
+    confirmAccountWide?: boolean,
   ): Promise<MutationResult> {
+    assertConfirmed(confirmAccountWide, "change an account-wide contact");
     const path = `/contacts/${encodeId(contactId)}`;
     const before = await this.client.request<JsonValue>(path);
     await this.client.request<JsonValue>(path, {
@@ -776,8 +812,9 @@ export class SipgateBackend implements TelephonyBackend {
   public async deleteContact(
     contactId: string,
     scopes?: ContactScope[],
-    _confirmAccountWide?: boolean,
+    confirmAccountWide?: boolean,
   ): Promise<MutationResult> {
+    assertConfirmed(confirmAccountWide, "delete an account-wide contact");
     const before = await this.client.request<JsonValue>(`/contacts/${encodeId(contactId)}`);
     const response = await this.client.request<JsonValue>(
       `/contacts/${encodeId(contactId)}`,
@@ -795,8 +832,9 @@ export class SipgateBackend implements TelephonyBackend {
 
   public async deleteContacts(
     input: DeleteContactsInput,
-    _confirmAccountWide?: boolean,
+    confirmAccountWide?: boolean,
   ): Promise<MutationResult> {
+    assertConfirmed(confirmAccountWide, "delete account-wide contacts");
     const before = input.contactIds && input.contactIds.length > 0
       ? await this.readContacts(input.contactIds)
       : input.source === undefined
@@ -825,8 +863,9 @@ export class SipgateBackend implements TelephonyBackend {
 
   public async importContactsCsv(
     base64Content: string,
-    _confirmAccountWide?: boolean,
+    confirmAccountWide?: boolean,
   ): Promise<MutationResult> {
+    assertConfirmed(confirmAccountWide, "import account-wide contacts");
     const before = await this.listAllContacts();
     await this.client.request<JsonValue>("/contacts/import/csv", {
       method: "POST",
@@ -839,8 +878,9 @@ export class SipgateBackend implements TelephonyBackend {
   public async putContactsVcard(
     scope: ContactScope,
     data: StructuredVCardUpsertInput[],
-    _confirmAccountWide?: boolean,
+    confirmAccountWide?: boolean,
   ): Promise<MutationResult> {
+    assertConfirmed(confirmAccountWide, "replace account-wide contacts");
     const contactIds = data
       .map((entry) => entry.contactId)
       .filter((contactId): contactId is string => Boolean(contactId));
@@ -884,8 +924,9 @@ export class SipgateBackend implements TelephonyBackend {
   public async addIncomingBlacklist(
     phoneNumber: string,
     isBlock?: boolean,
-    _confirmAccountWide?: boolean,
+    confirmAccountWide?: boolean,
   ): Promise<MutationResult> {
+    assertConfirmed(confirmAccountWide, "change the account-wide incoming blocklist");
     const before = await this.listIncomingBlacklist();
     await this.client.request<JsonValue>("/blacklist/incoming", {
       method: "POST",
@@ -897,8 +938,9 @@ export class SipgateBackend implements TelephonyBackend {
 
   public async removeIncomingBlacklist(
     phoneNumber: string,
-    _confirmAccountWide?: boolean,
+    confirmAccountWide?: boolean,
   ): Promise<MutationResult> {
+    assertConfirmed(confirmAccountWide, "change the account-wide incoming blocklist");
     const entries = asItems(await this.listIncomingBlacklist());
     const normalized = phoneNumber.startsWith("+") ? phoneNumber : `+${phoneNumber}`;
     const before = entries.find((entry) => stringField(entry, "phoneNumber") === normalized) ?? null;
@@ -988,9 +1030,18 @@ export class SipgateBackend implements TelephonyBackend {
     };
   }
 
+  private assertBulkHistoryLimit(count: number): void {
+    if (count < 150) return;
+    throw new SipgateApiError(
+      "sipgate accepts fewer than 150 history entries per bulk update.",
+      400,
+    );
+  }
+
   public async updateHistoryEntries(
     inputs: BulkHistoryEntryUpdateInput[],
   ): Promise<MutationResult> {
+    this.assertBulkHistoryLimit(inputs.length);
     const before = await this.readHistoryEntries(inputs.map((input) => input.id));
     await this.client.request<JsonValue>("/history", {
       method: "PUT",
@@ -1006,6 +1057,14 @@ export class SipgateBackend implements TelephonyBackend {
   }
 
   public async deleteHistoryEntries(entryIds?: string[]): Promise<MutationResult> {
+    if (entryIds !== undefined && entryIds.length === 0) {
+      // An empty list serializes to no query parameter at all, which sipgate
+      // reads as "delete the entire account history". Refuse it outright.
+      throw new SipgateApiError(
+        "Refusing to delete history with an empty entry list: omit the list deliberately to target the whole account.",
+        400,
+      );
+    }
     const before = entryIds === undefined
       ? await this.listAllHistoryEntries()
       : await this.readHistoryEntries(entryIds);
@@ -1026,8 +1085,9 @@ export class SipgateBackend implements TelephonyBackend {
 
   public async cancelPorting(
     portingId: number,
-    _confirmAccountWide?: boolean,
+    confirmAccountWide?: boolean,
   ): Promise<MutationResult> {
+    assertConfirmed(confirmAccountWide, "cancel a number porting");
     const before = await this.getPorting(portingId);
     const response = await this.client.request<JsonValue>(`/portings/${portingId}`, {
       method: "DELETE",
@@ -1044,8 +1104,9 @@ export class SipgateBackend implements TelephonyBackend {
 
   public async updateSipgateIoSettings(
     input: SipgateIoSettingsInput,
-    _confirmAccountWide?: boolean,
+    confirmAccountWide?: boolean,
   ): Promise<MutationResult> {
+    assertConfirmed(confirmAccountWide, "change the account-wide sipgate.io settings");
     const before = await optional(this.client.request<JsonValue>("/settings/sipgateio"));
     if (!before.available) {
       return unavailableFeatureMutation(

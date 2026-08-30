@@ -79,6 +79,14 @@
   that feature for register endpoints, not only phonelines and faxlines.
 - Refuse to delete an automated-recording greeting other than the one currently
   configured.
+- Refuse a history deletion whose entry list is present but empty. An empty
+  list serializes to no query parameter, which sipgate reads as "delete the
+  entire account history".
+- Enforce the account-wide confirmation inside SipgateBackend as well, not only
+  at the access-control boundary, since the backend is exported on its own.
+- Reject a bulk history update at sipgate's documented limit of 150 entries.
+- Strip query strings from webhook log URLs, which carry their credentials
+  there as plain strings that key-based redaction cannot see.
 
 - Add complete self-service tools for the requested sipgate v2 device surface:
   device reads, updates and deletion; aliases; caller ID; local prefix; tariff

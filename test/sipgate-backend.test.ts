@@ -1726,3 +1726,66 @@ test("SipgateBackend does not update unavailable sipgate.io settings", async () 
   assert.equal((result.after as Record<string, unknown>).changed, false);
   assert.equal((result.after as Record<string, unknown>).httpStatus, 403);
 });
+
+test("SipgateBackend refuses a history delete with an empty entry list", async () => {
+  const { backend, requests } = backendWithStatuses([]);
+
+  await assert.rejects(backend.deleteHistoryEntries([]), /empty entry list/);
+  assert.equal(requests.length, 0);
+});
+
+test("SipgateBackend repeats the id query parameter for every deleted history entry", async () => {
+  const { backend, requests } = backendWithStatuses([
+    { body: { id: "h0" } },
+    { body: { id: "h1" } },
+    { body: null },
+  ]);
+
+  await backend.deleteHistoryEntries(["h0", "h1"]);
+
+  const deleteRequest = requests.find((request) => request.method === "DELETE");
+  assert.ok(deleteRequest, "expected a DELETE request");
+  const ids = new URL(deleteRequest.url).searchParams.getAll("id");
+  assert.deepEqual(ids, ["h0", "h1"]);
+});
+
+test("SipgateBackend refuses account-wide writes without explicit confirmation", async () => {
+  const { backend, requests } = backendWithStatuses([]);
+
+  await assert.rejects(backend.cancelPorting(17), /without an explicit account-wide confirmation/);
+  await assert.rejects(
+    backend.addIncomingBlacklist("+4915799912345", true),
+    /without an explicit account-wide confirmation/,
+  );
+  await assert.rejects(
+    backend.createContact({ given: "A", family: "B" }),
+    /without an explicit account-wide confirmation/,
+  );
+  assert.equal(requests.length, 0);
+});
+
+test("SipgateBackend rejects a bulk history update at the documented limit", async () => {
+  const { backend, requests } = backendWithStatuses([]);
+  const inputs = Array.from({ length: 150 }, (_, index) => ({ id: `h${index}`, read: true }));
+
+  await assert.rejects(backend.updateHistoryEntries(inputs), /fewer than 150/);
+  assert.equal(requests.length, 0);
+});
+
+test("SipgateBackend strips credentials from webhook log URLs", async () => {
+  const { backend } = backendWithStatuses([
+    {
+      body: {
+        items: [{
+          url: "https://hooks.example.com/sipgate?token=supersecret",
+          response: "ok",
+        }],
+      },
+    },
+  ]);
+
+  const result = await backend.listWebhookLogs() as { items: Array<Record<string, string>> };
+
+  assert.equal(result.items[0]?.url, "https://hooks.example.com/sipgate?[REDACTED]");
+  assert.equal(result.items[0]?.response, "ok");
+});
