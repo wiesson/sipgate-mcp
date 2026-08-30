@@ -75,21 +75,33 @@ function encodeId(id: string): string {
   return encodeURIComponent(id);
 }
 
-function phonelineUnavailable(items = false): JsonObject {
+function unavailableNote(status: number | undefined, subject: string): string {
+  if (status === 403) {
+    return `sipgate denied access to ${subject} (HTTP 403). Either this account does not provide it, or the Personal Access Token lacks the scope for it.`;
+  }
+  if (status === 404) {
+    return `sipgate reports no ${subject} for this account (HTTP 404).`;
+  }
+  return `This sipgate account does not provide ${subject}.`;
+}
+
+function phonelineUnavailable(items = false, status?: number): JsonObject {
   return {
     ...(items ? { items: [] } : {}),
     phonelinesAvailable: false,
-    note: "This sipgate account does not provide the phoneline feature.",
+    ...(status === undefined ? {} : { httpStatus: status }),
+    note: unavailableNote(status, "the phoneline feature"),
   };
 }
 
-function phonelineMutationUnavailable(): MutationResult {
+function phonelineMutationUnavailable(status?: number): MutationResult {
   return {
     before: null,
     after: {
       changed: false,
       phonelinesAvailable: false,
-      note: "This sipgate account does not provide the phoneline feature; no change was attempted.",
+      ...(status === undefined ? {} : { httpStatus: status }),
+      note: `${unavailableNote(status, "the phoneline feature")} No change was attempted.`,
     },
   };
 }
@@ -106,6 +118,7 @@ const UNAVAILABLE_STATUS = new Set([403, 404]);
 interface OptionalResult<T> {
   value?: T;
   available: boolean;
+  status?: number;
 }
 
 async function optional<T>(request: Promise<T>): Promise<OptionalResult<T>> {
@@ -117,7 +130,7 @@ async function optional<T>(request: Promise<T>): Promise<OptionalResult<T>> {
       && error.status !== undefined
       && UNAVAILABLE_STATUS.has(error.status)
     ) {
-      return { available: false };
+      return { available: false, status: error.status };
     }
     throw error;
   }
@@ -183,8 +196,8 @@ export class SipgateBackend implements TelephonyBackend {
   }
 
   private async optionalPhonelineRead(path: string, list = false): Promise<JsonValue> {
-    const { value, available } = await optional(this.client.request<JsonValue>(path));
-    return available ? sanitize(value ?? (list ? { items: [] } : {})) : phonelineUnavailable(list);
+    const { value, available, status } = await optional(this.client.request<JsonValue>(path));
+    return available ? sanitize(value ?? (list ? { items: [] } : {})) : phonelineUnavailable(list, status);
   }
 
   public getPhoneline(userId: string, phonelineId: string): Promise<JsonValue> {
@@ -895,6 +908,16 @@ export class SipgateBackend implements TelephonyBackend {
   public async deleteAutorecordingGreeting(greetingId: string): Promise<MutationResult> {
     const before = await optional(this.client.request<JsonValue>("/autorecordings/greetings"));
     if (!before.available) return this.autorecordingUnavailableMutation();
+    const current = before.value && !Array.isArray(before.value) && typeof before.value === "object"
+      ? before.value
+      : undefined;
+    const currentId = current === undefined ? undefined : stringField(current, "id");
+    if (currentId !== undefined && currentId !== greetingId) {
+      throw new SipgateApiError(
+        "The requested automated-recording greeting is not the one currently configured.",
+        404,
+      );
+    }
     const response = await this.client.request<JsonValue>(
       `/autorecordings/greetings/${encodeId(greetingId)}`,
       { method: "DELETE" },
@@ -1637,7 +1660,7 @@ export class SipgateBackend implements TelephonyBackend {
     list = false,
   ): Promise<MutationResult> {
     const before = await optional(this.client.request<JsonValue>(readPath));
-    if (!before.available) return phonelineMutationUnavailable();
+    if (!before.available) return phonelineMutationUnavailable(before.status);
     await this.client.request<JsonValue>(writePath, {
       method,
       ...(body === undefined ? {} : { body }),
@@ -1647,7 +1670,11 @@ export class SipgateBackend implements TelephonyBackend {
       before: sanitize(before.value ?? (list ? { items: [] } : {})),
       after: after.available
         ? sanitize(after.value ?? (list ? { items: [] } : {}))
-        : phonelineUnavailable(list),
+        : {
+          ...phonelineUnavailable(list, after.status),
+          changed: true,
+          note: "The change was applied, but sipgate denied the read-back so the new state could not be confirmed.",
+        },
     };
   }
 

@@ -315,7 +315,8 @@ test("SipgateBackend reports a specific phoneline tool as unavailable on HTTP 40
 
   assert.deepEqual(await backend.getPhoneline("w0", "p0"), {
     phonelinesAvailable: false,
-    note: "This sipgate account does not provide the phoneline feature.",
+    httpStatus: 403,
+    note: "sipgate denied access to the phoneline feature (HTTP 403). Either this account does not provide it, or the Personal Access Token lacks the scope for it.",
   });
 });
 
@@ -327,7 +328,8 @@ test("SipgateBackend does not attempt a phoneline mutation when its read is unav
     after: {
       changed: false,
       phonelinesAvailable: false,
-      note: "This sipgate account does not provide the phoneline feature; no change was attempted.",
+      httpStatus: 403,
+      note: "sipgate denied access to the phoneline feature (HTTP 403). Either this account does not provide it, or the Personal Access Token lacks the scope for it. No change was attempted.",
     },
   });
   assert.equal(requests.length, 1);
@@ -1337,4 +1339,28 @@ test("SipgateBackend redacts SIM secrets that arrive outside a credentials wrapp
   assert.equal(result.before.puk1, "[REDACTED]");
   assert.equal(result.before.puk2, "[REDACTED]");
   assert.equal(result.before.iccid, "[REDACTED]");
+});
+
+test("SipgateBackend says a phoneline change was applied when only the read-back is denied", async () => {
+  const { backend } = backendWithStatuses([
+    { body: { id: "p0", alias: "Old" } },
+    { body: null },
+    { status: 403 },
+  ]);
+
+  const result = await backend.updatePhonelineAlias("w0", "p0", "Office") as {
+    after: Record<string, unknown>;
+  };
+
+  assert.equal(result.after.changed, true);
+  assert.match(String(result.after.note), /change was applied/);
+});
+
+test("SipgateBackend refuses to delete a recording greeting that is not the configured one", async () => {
+  const { backend, requests } = backendWithStatuses([
+    { body: { id: "g0", greetingUrl: "https://example.com/g0.wav" } },
+  ]);
+
+  await assert.rejects(backend.deleteAutorecordingGreeting("g9"), /not the one currently configured/);
+  assert.equal(requests.length, 1);
 });

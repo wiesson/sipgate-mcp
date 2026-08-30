@@ -53,6 +53,15 @@
   faxline does.
 - Accept national phone formats for transfer targets and fax recipients, which
   the API documents as plain strings.
+- Report the observed HTTP status when a phoneline or recording feature is
+  unavailable, so a denied token scope is no longer indistinguishable from an
+  account that simply has no phoneline layer.
+- Say explicitly when a phoneline change was applied but only its read-back was
+  denied, instead of reporting the feature as unavailable.
+- Accept an owned device as an automated-recording extension; sipgate documents
+  that feature for register endpoints, not only phonelines and faxlines.
+- Refuse to delete an automated-recording greeting other than the one currently
+  configured.
 
 - Add complete self-service tools for the requested sipgate v2 device surface:
   device reads, updates and deletion; aliases; caller ID; local prefix; tariff

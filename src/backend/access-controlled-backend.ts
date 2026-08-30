@@ -1386,11 +1386,15 @@ export class AccessControlledBackend implements TelephonyBackend {
 
   private async assertOwnedAutorecordingExtension(extension: string): Promise<void> {
     try {
-      const [phonelines, faxlineIds] = await Promise.all([
+      // sipgate documents automated recording for register endpoints, so an
+      // owned device is the primary case; phonelines and faxlines are accepted
+      // for accounts that expose them.
+      const [phonelines, faxlineIds, deviceIds] = await Promise.all([
         this.ownedPhonelineState(),
         this.ownedFaxlineIds(),
+        this.ownedDeviceIds(),
       ]);
-      if (phonelines.ids.has(extension) || faxlineIds.has(extension)) return;
+      if (deviceIds.has(extension) || phonelines.ids.has(extension) || faxlineIds.has(extension)) return;
       throw new AccessPolicyError(
         "User scope does not permit access to the requested automated-recording extension.",
       );
