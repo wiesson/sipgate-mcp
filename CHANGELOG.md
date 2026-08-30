@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0 - 2026-08-30
+
+- Treat a 403/404 from the phoneline endpoints as "feature absent" instead of a
+  hard failure. Accounts without a phoneline layer keep their numbers directly
+  on a device, and a single failing phoneline lookup previously took down
+  `list_numbers`, `call_history`, `get_routing`, and `get_settings`.
+- Resolve user numbers through the owning device when no phoneline layer
+  exists, and report the fallback via `source`, `phonelinesAvailable`, and
+  `numbersAvailable`.
+- Scope user call history to device IDs when no phoneline IDs are available, so
+  history is no longer silently empty or denied.
+
 ## 0.3.1 - 2026-08-30
 
 - Fix Claude Code registration by using its unambiguous `mcp add-json` command

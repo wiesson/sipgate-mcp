@@ -252,3 +252,16 @@ test("account scope requires an administrator and preserves account-wide operati
   assert.equal(administrator.calls.some((call) =>
     call.method === "getRouting" && call.args[0] === "w1"), true);
 });
+
+test("user scope scopes call history to devices when the account has no phonelines", async () => {
+  const backend = new FakeBackend();
+  backend.routing = { numbers: [], users: [{ userId: "w0", phonelines: [] }] };
+  const scoped = await createAccessControlledBackend(backend, "user");
+
+  await scoped.getCallHistory({ offset: 0, limit: 10 });
+
+  const historyCall = backend.calls.find((call) => call.method === "getCallHistory");
+  assert.ok(historyCall, "expected the history request to reach the delegate");
+  const query = historyCall?.args[0] as HistoryQuery;
+  assert.deepEqual(query.connectionIds, ["e0"]);
+});

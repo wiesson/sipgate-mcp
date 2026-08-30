@@ -2,7 +2,7 @@
 name: sipgate-mcp
 description: Install and securely configure the sipgate MCP server when a user asks to set up or connect a sipgate account to Codex or Claude. Do not use for ordinary sipgate product questions.
 metadata:
-  version: "0.3.1"
+  version: "0.4.0"
 ---
 
 # Set up sipgate MCP
@@ -10,19 +10,19 @@ metadata:
 Install the matching CLI version with one available package manager:
 
 ```bash
-vp install -g sipgate-mcp@0.3.1
+vp install -g sipgate-mcp@0.4.0
 ```
 
 ```bash
-npm install -g sipgate-mcp@0.3.1
+npm install -g sipgate-mcp@0.4.0
 ```
 
 ```bash
-pnpm add -g sipgate-mcp@0.3.1
+pnpm add -g sipgate-mcp@0.4.0
 ```
 
 Run only one install command. Confirm that `sipgate-mcp --version` reports
-`0.3.1` before continuing.
+`0.4.0` before continuing.
 
 ## Security boundary
 

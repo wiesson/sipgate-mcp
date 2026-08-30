@@ -152,6 +152,7 @@ test("SipgateBackend user routing does not request account-wide numbers or users
         }],
         forwardings: [],
       }],
+      phonelinesAvailable: true,
     }],
   });
   assert.deepEqual(requests.map((request) => new URL(request.url).pathname), [
@@ -243,4 +244,108 @@ test("SipgateBackend user Click2Dial does not read account-wide active calls", a
     method: request.method,
     path: new URL(request.url).pathname,
   })), [{ method: "POST", path: "/v2/sessions/calls" }]);
+});
+
+interface StubResponse {
+  status?: number;
+  body?: JsonValue;
+}
+
+function backendWithStatuses(responses: StubResponse[]): {
+  backend: SipgateBackend;
+  requests: RecordedRequest[];
+} {
+  const queue = [...responses];
+  const requests: RecordedRequest[] = [];
+  const fetchMock = (async (input: string | URL | Request, init?: RequestInit) => {
+    requests.push({ url: String(input), method: init?.method ?? "GET" });
+    const next = queue.shift() ?? {};
+    const status = next.status ?? 200;
+    if (status >= 400) return new Response(null, { status });
+    return new Response(JSON.stringify(next.body ?? null), { status });
+  }) as typeof fetch;
+  const client = new SipgateClient({ tokenId: "id", token: "secret", fetch: fetchMock });
+  return { backend: new SipgateBackend(client), requests };
+}
+
+test("SipgateBackend serves user numbers from devices when phonelines are unavailable", async () => {
+  const { backend, requests } = backendWithStatuses([
+    { status: 403 },
+    { body: { items: [{ id: "e0", alias: "VoIP" }] } },
+    {
+      body: {
+        items: [
+          { id: "n0", number: "+49211123456", endpointId: "e0" },
+          { id: "n1", number: "+49211234567", endpointId: "e0" },
+          { id: "n2", number: "+49211999999", endpointId: "e9" },
+        ],
+      },
+    },
+  ]);
+
+  const result = await backend.listUserNumbers("w0", { offset: 0, limit: 10 });
+
+  assert.deepEqual(result, {
+    items: [
+      { id: "n0", number: "+49211123456", endpointId: "e0" },
+      { id: "n1", number: "+49211234567", endpointId: "e0" },
+    ],
+    pagination: { offset: 0, limit: 10, returned: 2, totalCount: 2 },
+    source: "devices",
+    phonelinesAvailable: false,
+    numbersAvailable: true,
+  });
+  assert.deepEqual(requests.map((request) => new URL(request.url).pathname), [
+    "/v2/w0/phonelines",
+    "/v2/w0/devices",
+    "/v2/numbers",
+  ]);
+});
+
+test("SipgateBackend reports phonelines as unavailable instead of failing", async () => {
+  const { backend } = backendWithStatuses([{ status: 403 }]);
+
+  assert.deepEqual(await backend.listPhonelines("w0"), {
+    items: [],
+    phonelinesAvailable: false,
+  });
+});
+
+test("SipgateBackend still surfaces non-feature errors from phonelines", async () => {
+  const { backend } = backendWithStatuses([{ status: 500 }]);
+
+  await assert.rejects(backend.listPhonelines("w0"), /HTTP 500/);
+});
+
+test("SipgateBackend returns settings when the account has no phoneline layer", async () => {
+  const { backend } = backendWithStatuses([
+    { body: { id: "w0", busyOnBusy: false, defaultDevice: "e0" } },
+    { body: { items: [{ id: "e0", alias: "VoIP", dnd: false }] } },
+    { status: 403 },
+  ]);
+
+  const result = await backend.getSettings("w0") as {
+    users: { phonelines: JsonValue[]; phonelinesAvailable: boolean }[];
+  };
+
+  assert.equal(result.users.length, 1);
+  assert.deepEqual(result.users[0]?.phonelines, []);
+  assert.equal(result.users[0]?.phonelinesAvailable, false);
+});
+
+test("SipgateBackend falls back to device numbers for routing without phonelines", async () => {
+  const { backend } = backendWithStatuses([
+    { status: 403 },
+    { status: 403 },
+    { body: { items: [{ id: "e0" }] } },
+    { body: { items: [{ id: "n0", number: "+49211123456", endpointId: "e0" }] } },
+  ]);
+
+  const result = await backend.getRouting("w0") as {
+    numbers: JsonValue[];
+    users: { phonelinesAvailable: boolean }[];
+  };
+
+  assert.deepEqual(result.numbers, [{ id: "n0", number: "+49211123456", endpointId: "e0" }]);
+  assert.equal(result.users[0]?.phonelinesAvailable, false);
 });
