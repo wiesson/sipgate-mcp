@@ -41,6 +41,11 @@ const id = z.string().trim().min(1).max(128);
 const int32Id = z.int().min(-2_147_483_648).max(2_147_483_647);
 const swaggerString = z.string();
 const e164 = z.string().regex(/^\+[1-9]\d{6,14}$/, "Use an E.164 phone number such as +4915799912345");
+/** sipgate documents these as plain strings and accepts national formats. */
+const dialString = z.string().trim().min(3).regex(
+  /^[+0-9][0-9 ()\/.-]*$/,
+  "Use a phone number, for example +4915799912345 or 0211 1234567",
+);
 const isoDateTime = z.string().refine((value) => !Number.isNaN(Date.parse(value)), "Use an ISO 8601 date-time");
 
 function define<T extends z.ZodType<Record<string, unknown>>>(options: {
@@ -784,7 +789,7 @@ export function createToolDefinitions(
       schema: z.object({
         call_id: id.describe("Call ID returned by list_calls"),
         attended: z.boolean().describe("true for attended; false for blind transfer"),
-        phone_number: e164.describe("Transfer target phone number"),
+        phone_number: dialString.describe("Transfer target phone number"),
         caller_id: e164.optional().describe("Optional owned caller ID for the transfer"),
       }),
       annotations: actionAnnotations,
@@ -820,7 +825,7 @@ export function createToolDefinitions(
       description: `${changeWarning} send a PDF fax from an owned faxline. SENDING A FAX INCURS CHARGES. The API has no synchronous fax-state read-back, so before is null and after includes the session response and an explicit note.`,
       schema: z.object({
         faxline_id: id.describe("Faxline ID returned by list_faxlines"),
-        recipient: e164,
+        recipient: dialString,
         filename: swaggerString.describe("Fax document filename, for example fax.pdf"),
         base64_content: z.string().max(28_330_000)
           .describe("Base64-encoded PDF content; sipgate's maximum is 28,330,000 characters"),

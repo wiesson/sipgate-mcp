@@ -305,6 +305,11 @@ export class AccessControlledBackend implements TelephonyBackend {
     return this.delegate.listFaxlineNumbers(userId, faxlineId);
   }
 
+  public async getHistoryEntry(entryId: string): Promise<JsonValue> {
+    if (this.scope === "user") await this.assertOwnedHistoryEntry(entryId);
+    return this.delegate.getHistoryEntry(entryId);
+  }
+
   public getSettings(userId?: string): Promise<JsonValue> {
     if (this.scope === "account") return this.delegate.getSettings(userId);
     this.assertUser(userId);
@@ -690,8 +695,36 @@ export class AccessControlledBackend implements TelephonyBackend {
         );
       }
       await this.assertOwnedFaxline(input.faxlineId);
+      await this.assertOwnedHistoryEntry(input.faxId);
     }
     return this.delegate.resendFax(input);
+  }
+
+  /**
+   * A fax ID is a history entry. Resending one that belongs to another user
+   * would retransmit their document and bill it, so the entry's connection must
+   * be one the authenticated user owns.
+   */
+  private async assertOwnedHistoryEntry(entryId: string): Promise<void> {
+    let connectionIds: Set<string>;
+    let entry: JsonObject | undefined;
+    try {
+      [connectionIds, entry] = await Promise.all([
+        this.ownedConnectionIds(),
+        this.delegate.getHistoryEntry(entryId).then((value) => asObject(value)),
+      ]);
+    } catch {
+      throw new AccessPolicyError(
+        "User scope could not establish ownership of the requested history entry.",
+      );
+    }
+    const entryConnections = Array.isArray(entry?.connectionIds)
+      ? entry.connectionIds.filter((value): value is string => typeof value === "string")
+      : [];
+    if (entryConnections.some((connectionId) => connectionIds.has(connectionId))) return;
+    throw new AccessPolicyError(
+      "User scope does not permit access to the requested history entry.",
+    );
   }
 
   private assertUser(userId: string | undefined): void {
@@ -769,13 +802,16 @@ export class AccessControlledBackend implements TelephonyBackend {
     deviceIds: Set<string>,
     numbers: OwnedNumbers,
   ): boolean {
-    const participants = objectArray(call.participants);
-    return participants.some((participant) => {
-      const participantId = stringField(participant, "participantId");
-      const phoneNumber = stringField(participant, "phoneNumber");
-      return (participantId !== undefined && deviceIds.has(participantId))
-        || (phoneNumber !== undefined && numbers.phoneNumbers.has(phoneNumber));
-    });
+    // Being a participant in someone else's call is not ownership: the remote
+    // party of a foreign call carries an owned number too. Only the participant
+    // sipgate marks as the call owner counts, and an unmarked call fails closed.
+    const owner = objectArray(call.participants)
+      .find((participant) => participant.owner === true);
+    if (!owner) return false;
+    const participantId = stringField(owner, "participantId");
+    const phoneNumber = stringField(owner, "phoneNumber");
+    return (participantId !== undefined && deviceIds.has(participantId))
+      || (phoneNumber !== undefined && numbers.phoneNumbers.has(phoneNumber));
   }
 
   private async ownedPhonelineIds(): Promise<Set<string>> {

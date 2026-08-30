@@ -372,6 +372,10 @@ export class SipgateBackend implements TelephonyBackend {
     return sanitize({ numbers: uniqueNumbers, users });
   }
 
+  public async getHistoryEntry(entryId: string): Promise<JsonValue> {
+    return sanitize(await this.client.request<JsonValue>(`/history/${encodeId(entryId)}`) ?? {});
+  }
+
   public async getCallHistory(query: HistoryQuery): Promise<JsonValue> {
     const response = await this.client.request<JsonValue>("/history", {
       query: {

@@ -172,6 +172,7 @@ export interface TelephonyBackend {
   validateQuickDialNumber(quickDialNumber: string): Promise<JsonValue>;
   getRouting(userId?: string): Promise<JsonValue>;
   getCallHistory(query: HistoryQuery): Promise<JsonValue>;
+  getHistoryEntry(entryId: string): Promise<JsonValue>;
   listCalls(): Promise<JsonValue>;
   listNotifications(userId: string): Promise<JsonValue>;
   listFaxlines(userId: string): Promise<JsonValue>;

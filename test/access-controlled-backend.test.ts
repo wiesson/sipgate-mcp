@@ -61,11 +61,17 @@ class FakeBackend implements TelephonyBackend {
     data: [
       {
         callId: "c0",
-        participants: [{ participantId: "e0", phoneNumber: "+49211123456" }],
+        participants: [
+          { participantId: "e0", phoneNumber: "+49211123456", owner: true },
+          { participantId: "x0", phoneNumber: "+49301111111", owner: false },
+        ],
       },
       {
         callId: "c9",
-        participants: [{ participantId: "e9", phoneNumber: "+49211999999" }],
+        participants: [
+          { participantId: "e9", phoneNumber: "+49211999999", owner: true },
+          { participantId: "x9", phoneNumber: "+49302222222", owner: false },
+        ],
       },
     ],
   };
@@ -115,6 +121,12 @@ class FakeBackend implements TelephonyBackend {
         returned: page.length,
         totalCount: numbers.length,
       },
+    });
+  }
+  getHistoryEntry(entryId: string): Promise<JsonValue> {
+    return this.record("getHistoryEntry", [entryId], {
+      id: entryId,
+      connectionIds: entryId === "f0" ? ["e0"] : ["e9"],
     });
   }
   getUserNumbers(userId: string): Promise<JsonValue> {
@@ -759,7 +771,10 @@ test("user scope filters active calls and rejects a foreign call ID", async () =
   assert.deepEqual(await backend.listCalls(), {
     data: [{
       callId: "c0",
-      participants: [{ participantId: "e0", phoneNumber: "+49211123456" }],
+      participants: [
+        { participantId: "e0", phoneNumber: "+49211123456", owner: true },
+        { participantId: "x0", phoneNumber: "+49301111111", owner: false },
+      ],
     }],
   });
   const mutations: Array<() => Promise<unknown>> = [
@@ -806,4 +821,46 @@ test("user scope rejects a foreign faxline", async () => {
     AccessPolicyError,
   );
   assert.equal(delegate.calls.some((call) => ["listFaxlineNumbers", "sendFax"].includes(call.method)), false);
+});
+
+test("user scope does not own a foreign call merely because its remote party is an owned number", async () => {
+  const delegate = new FakeBackend();
+  delegate.activeCalls = {
+    data: [{
+      callId: "c9",
+      participants: [
+        { participantId: "e9", phoneNumber: "+49211999999", owner: true },
+        { participantId: "x9", phoneNumber: "+49211123456", owner: false },
+      ],
+    }],
+  };
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await assert.rejects(backend.hangupCall("c9"), AccessPolicyError);
+  const listed = await backend.listCalls() as { data: JsonValue[] };
+  assert.deepEqual(listed.data, []);
+});
+
+test("user scope denies a call whose owner participant is unmarked", async () => {
+  const delegate = new FakeBackend();
+  delegate.activeCalls = {
+    data: [{
+      callId: "c1",
+      participants: [{ participantId: "e0", phoneNumber: "+49211123456" }],
+    }],
+  };
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await assert.rejects(backend.hangupCall("c1"), AccessPolicyError);
+});
+
+test("user scope refuses to resend a fax belonging to another user", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await assert.rejects(
+    backend.resendFax({ faxId: "f9", faxlineId: "f0" }),
+    AccessPolicyError,
+  );
+  assert.equal(delegate.calls.some((call) => call.method === "resendFax"), false);
 });

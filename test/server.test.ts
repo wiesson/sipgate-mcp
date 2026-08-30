@@ -29,6 +29,7 @@ function backend(): TelephonyBackend {
     validateQuickDialNumber: async () => ({}),
     getRouting: async () => ({ numbers: [], users: [] }),
     getCallHistory: async () => ({ items: [] }),
+    getHistoryEntry: async () => ({ items: [] }),
     listCalls: async () => ({ data: [] }),
     listNotifications: async () => ({ call: [], fax: [], sms: [], voicemail: [] }),
     listFaxlines: async () => ({ items: [] }),

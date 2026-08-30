@@ -22,6 +22,13 @@
 - Page through every owned number when deciding ownership instead of stopping
   after 1000.
 - Redact PUK and ICCID values that arrive outside a credentials wrapper.
+- Establish active-call ownership from the participant sipgate marks as the
+  call owner. Being the remote party of another user's call is not ownership,
+  and a call without a marked owner is denied.
+- Verify that a resent fax belongs to the authenticated user, not just that the
+  faxline does.
+- Accept national phone formats for transfer targets and fax recipients, which
+  the API documents as plain strings.
 
 - Add complete self-service tools for the requested sipgate v2 device surface:
   device reads, updates and deletion; aliases; caller ID; local prefix; tariff
