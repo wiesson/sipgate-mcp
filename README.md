@@ -43,13 +43,16 @@ sipgate-mcp setup
 
 The setup stores the PAT token ID and token in macOS Keychain without placing
 either value in shell history or an MCP configuration file. It registers every
-installed supported client (Codex and Claude Code) in user/read-only mode.
+installed supported client (Codex and Claude Code) in user scope. An
+interactive setup asks whether to enable write tools; a non-interactive setup
+without a mode flag registers read-only.
 Those clients start and stop the stdio server automatically; `sipgate-mcp` does
 not run as a daemon and does not need to be started manually.
 
 Use `sipgate-mcp setup --client codex` or `--client claude` to configure only
-one client. Add `--allow-writes` only when agent-initiated account changes are
-deliberately wanted. `--dry-run` prints the secret-free registration commands
+one client. `--allow-writes` and `--read-only` pick the mode without being
+asked; write tools let the assistant place calls, send SMS, and change routing
+and DND. `--dry-run` prints the secret-free registration commands
 without changing the Keychain or client configuration. Repeated setup runs
 reuse existing Keychain credentials; use `--replace-credentials` only to rotate
 the stored PAT-ID and PAT.

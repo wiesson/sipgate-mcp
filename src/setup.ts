@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { closeSync, openSync, readSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   loadStoredCredentials,
@@ -9,7 +10,8 @@ import {
 export type SetupClient = "codex" | "claude";
 
 export interface SetupOptions {
-  allowWrites: boolean;
+  /** undefined means the mode was not given on the command line and is asked for. */
+  allowWrites: boolean | undefined;
   clients: SetupClient[];
   dryRun: boolean;
   replaceCredentials: boolean;
@@ -24,7 +26,7 @@ export class SetupError extends Error {}
 
 export function parseSetupArgs(args: string[]): SetupOptions {
   const clients: SetupClient[] = [];
-  let allowWrites = false;
+  let allowWrites: boolean | undefined;
   let dryRun = false;
   let replaceCredentials = false;
 
@@ -32,6 +34,10 @@ export function parseSetupArgs(args: string[]): SetupOptions {
     const argument = args[index];
     if (argument === "--allow-writes") {
       allowWrites = true;
+      continue;
+    }
+    if (argument === "--read-only") {
+      allowWrites = false;
       continue;
     }
     if (argument === "--dry-run") {
@@ -62,6 +68,46 @@ export function parseSetupArgs(args: string[]): SetupOptions {
     dryRun,
     replaceCredentials,
   };
+}
+
+export function readTtyLine(): string {
+  const descriptor = openSync("/dev/tty", "r");
+  try {
+    const buffer = Buffer.alloc(256);
+    const bytes = readSync(descriptor, buffer, 0, buffer.length, null);
+    return buffer.subarray(0, bytes).toString("utf8").trim();
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+/**
+ * Write tools place real calls and send real SMS, so the mode is a deliberate
+ * choice rather than a silent default. An explicit flag wins; an interactive
+ * run asks; a non-interactive run without a flag stays read-only.
+ */
+export function resolveWriteMode(
+  allowWrites: boolean | undefined,
+  interactive: boolean = process.stdin.isTTY === true,
+  ask: () => string = readTtyLine,
+  output: Pick<NodeJS.WriteStream, "write"> = process.stderr,
+): boolean {
+  if (allowWrites !== undefined) return allowWrites;
+  if (!interactive) {
+    output.write(
+      "No mode selected and no terminal to ask. Registering read-only. Re-run with --allow-writes to enable calls, SMS, routing, and DND.\n",
+    );
+    return false;
+  }
+  output.write(
+    "\nEnable write tools? They let the assistant place calls, send SMS, and change routing and DND.\n" +
+    "Read-only mode can only look at your account.\n" +
+    "Enable writes? [Y/n] ",
+  );
+  const answer = ask().toLowerCase();
+  const enabled = answer === "" || answer === "y" || answer === "yes" || answer === "j" || answer === "ja";
+  output.write(enabled ? "Write tools enabled.\n" : "Staying read-only.\n");
+  return enabled;
 }
 
 export function buildRegistrationCommand(
@@ -158,13 +204,16 @@ export function runSetup(
   }
 
   const entrypoint = resolve(entrypointArgument);
+  const allowWrites = options.dryRun
+    ? options.allowWrites === true
+    : resolveWriteMode(options.allowWrites);
   const commands = options.clients.map((client) => ({
     client,
     registration: buildRegistrationCommand(
       client,
       process.execPath,
       entrypoint,
-      options.allowWrites,
+      allowWrites,
     ),
   }));
 
@@ -207,7 +256,7 @@ export function runSetup(
       throw new SetupError(`Could not register sipgate-mcp with ${client}.`);
     }
     process.stderr.write(
-      `Registered sipgate-mcp with ${client} in user scope (${options.allowWrites ? "writes enabled" : "read-only"}).\n`,
+      `Registered sipgate-mcp with ${client} in user scope (${allowWrites ? "writes enabled" : "read-only"}).\n`,
     );
   }
 
@@ -223,7 +272,8 @@ export const SETUP_HELP = `Usage:
 
 Setup options:
   --client codex|claude          Register only this client (repeatable)
-  --allow-writes                 Register write tools; default is read-only
+  --allow-writes                 Register write tools without asking
+  --read-only                    Register read-only tools without asking
   --replace-credentials          Replace an existing PAT-ID and PAT in Keychain
   --dry-run                      Print registration commands without changing anything
 `;

@@ -46,6 +46,41 @@ function encodeId(id: string): string {
   return encodeURIComponent(id);
 }
 
+/**
+ * sipgate answers 403/404 for endpoints an account does not provide. Newer
+ * accounts have no phoneline layer at all: their numbers hang directly off a
+ * device. Treat those statuses as "feature absent" instead of a hard failure so
+ * a missing phoneline layer cannot take down number, history, and settings
+ * lookups that can be served from devices instead.
+ */
+const UNAVAILABLE_STATUS = new Set([403, 404]);
+
+interface OptionalResult<T> {
+  value?: T;
+  available: boolean;
+}
+
+async function optional<T>(request: Promise<T>): Promise<OptionalResult<T>> {
+  try {
+    return { value: await request, available: true };
+  } catch (error) {
+    if (
+      error instanceof SipgateApiError
+      && error.status !== undefined
+      && UNAVAILABLE_STATUS.has(error.status)
+    ) {
+      return { available: false };
+    }
+    throw error;
+  }
+}
+
+function idSet(items: JsonObject[]): Set<string> {
+  return new Set(
+    items.map((item) => stringField(item, "id")).filter((id): id is string => Boolean(id)),
+  );
+}
+
 export class SipgateBackend implements TelephonyBackend {
   public constructor(private readonly client: SipgateClient) {}
 
@@ -86,15 +121,77 @@ export class SipgateBackend implements TelephonyBackend {
   }
 
   public async listPhonelines(userId: string): Promise<JsonValue> {
-    const response = await this.client.request<JsonValue>(`/${encodeId(userId)}/phonelines`);
-    return sanitize(response ?? { items: [] });
+    const { value, available } = await this.tryListPhonelines(userId);
+    if (!available) return { items: [], phonelinesAvailable: false };
+    return sanitize(value ?? { items: [] });
+  }
+
+  private tryListPhonelines(userId: string): Promise<OptionalResult<JsonValue>> {
+    return optional(this.client.request<JsonValue>(`/${encodeId(userId)}/phonelines`));
+  }
+
+  private async listDeviceIds(userId: string): Promise<Set<string>> {
+    const response = await this.client.request<JsonValue>(`/${encodeId(userId)}/devices`);
+    return idSet(asItems(response));
+  }
+
+  /**
+   * Fallback for accounts without a phoneline layer: numbers are matched to the
+   * user through the device their endpoint points at.
+   */
+  private async listAllAccountNumbers(): Promise<JsonObject[]> {
+    const pageSize = 1000;
+    const all: JsonObject[] = [];
+    for (let offset = 0; ; offset += pageSize) {
+      const response = await this.client.request<JsonValue>("/numbers", {
+        query: { offset, limit: pageSize },
+      });
+      const page = asItems(response);
+      all.push(...page);
+      const envelope = response && !Array.isArray(response) && typeof response === "object"
+        ? response
+        : {};
+      const totalCount = typeof envelope.totalCount === "number" ? envelope.totalCount : undefined;
+      // sipgate may clamp the requested limit, so advance by what it actually
+      // returned and stop once a page comes back empty or the count is reached.
+      if (page.length === 0) break;
+      if (totalCount !== undefined && all.length >= totalCount) break;
+      if (page.length < pageSize) break;
+    }
+    return all;
+  }
+
+  private async listDeviceNumbers(
+    userId: string,
+    { offset, limit }: PaginationInput,
+    phonelinesAvailable: boolean,
+  ): Promise<JsonValue> {
+    const [deviceIds, accountNumbers] = await Promise.all([
+      this.listDeviceIds(userId),
+      this.listAllAccountNumbers(),
+    ]);
+    const owned = accountNumbers.filter((number) => {
+      const endpointId = stringField(number, "endpointId");
+      return endpointId !== undefined && deviceIds.has(endpointId);
+    });
+    const page = owned.slice(offset, offset + limit);
+    return sanitize({
+      items: page,
+      pagination: { offset, limit, returned: page.length, totalCount: owned.length },
+      source: "devices",
+      phonelinesAvailable,
+    });
   }
 
   public async listUserNumbers(
     userId: string,
     { offset, limit }: PaginationInput,
   ): Promise<JsonValue> {
-    const phonelines = asItems(await this.listPhonelines(userId));
+    const { value: phonelinesValue, available } = await this.tryListPhonelines(userId);
+    const phonelines = asItems(phonelinesValue);
+    if (!available || phonelines.length === 0) {
+      return this.listDeviceNumbers(userId, { offset, limit }, available);
+    }
     const numberGroups = await Promise.all(phonelines.map(async (phoneline) => {
       const phonelineId = stringField(phoneline, "id");
       if (!phonelineId) return [];
@@ -148,8 +245,8 @@ export class SipgateBackend implements TelephonyBackend {
       .filter((id): id is string => Boolean(id));
 
     const users = await Promise.all(userIds.map(async (id) => {
-      const phonelinesResponse = await this.listPhonelines(id);
-      const phonelines = await Promise.all(asItems(phonelinesResponse).map(async (phoneline) => {
+      const phonelinesResult = await this.tryListPhonelines(id);
+      const phonelines = await Promise.all(asItems(phonelinesResult.value).map(async (phoneline) => {
         const phonelineId = stringField(phoneline, "id");
         if (!phonelineId) return { ...phoneline, numbers: [], forwardings: [] };
         const base = `/${encodeId(id)}/phonelines/${encodeId(phonelineId)}`;
@@ -167,11 +264,15 @@ export class SipgateBackend implements TelephonyBackend {
           forwardings: asItems(forwardings),
         };
       }));
-      return { userId: id, phonelines };
+      return { userId: id, phonelines, phonelinesAvailable: phonelinesResult.available };
     }));
 
+    const routedNumbers = users.flatMap(({ phonelines }) =>
+      phonelines.flatMap((phoneline) => phoneline.numbers));
     const numbers = userId
-      ? users.flatMap(({ phonelines }) => phonelines.flatMap((phoneline) => phoneline.numbers))
+      ? (routedNumbers.length > 0
+        ? routedNumbers
+        : asItems(await this.listUserNumbers(userId, { offset: 0, limit: 1000 })))
       : asItems(numbersResponse);
     const uniqueNumbers = [...new Map(numbers.map((number) => [
       stringField(number, "id") ?? stringField(number, "number") ?? JSON.stringify(number),
@@ -214,11 +315,11 @@ export class SipgateBackend implements TelephonyBackend {
       const user = userValue as JsonObject;
       const id = stringField(user, "id");
       if (!id) return null;
-      const [devicesResponse, phonelinesResponse] = await Promise.all([
+      const [devicesResponse, phonelinesResult] = await Promise.all([
         this.client.request<JsonValue>(`/${encodeId(id)}/devices`),
-        this.client.request<JsonValue>(`/${encodeId(id)}/phonelines`),
+        this.tryListPhonelines(id),
       ]);
-      const phonelines = await Promise.all(asItems(phonelinesResponse).map(async (line) => {
+      const phonelines = await Promise.all(asItems(phonelinesResult.value).map(async (line) => {
         const lineId = stringField(line, "id");
         if (!lineId) return line;
         return await this.client.request<JsonValue>(`/${encodeId(id)}/phonelines/${encodeId(lineId)}`) ?? line;
@@ -231,6 +332,7 @@ export class SipgateBackend implements TelephonyBackend {
           devices: asItems(devicesResponse),
         },
         phonelines,
+        phonelinesAvailable: phonelinesResult.available,
       };
     }));
     return sanitize({ users: settings.filter((item) => item !== null) });
@@ -381,8 +483,8 @@ export class SipgateBackend implements TelephonyBackend {
   }
 
   private async findNumber(numberId: string): Promise<JsonObject> {
-    const response = await this.client.request<JsonValue>("/numbers", { query: { offset: 0, limit: 1000 } });
-    const number = asItems(response).find((item) => stringField(item, "id") === numberId);
+    const number = (await this.listAllAccountNumbers())
+      .find((item) => stringField(item, "id") === numberId);
     if (!number) throw new SipgateApiError("The requested sipgate phone number was not found.", 404);
     return number;
   }

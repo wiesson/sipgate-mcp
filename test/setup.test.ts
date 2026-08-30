@@ -4,11 +4,12 @@ import {
   buildRegistrationCommand,
   ensureStoredCredentials,
   parseSetupArgs,
+  resolveWriteMode,
 } from "../src/setup.js";
 
-test("parseSetupArgs defaults to both clients and read-only mode", () => {
+test("parseSetupArgs defaults to both clients and an unset mode", () => {
   assert.deepEqual(parseSetupArgs([]), {
-    allowWrites: false,
+    allowWrites: undefined,
     clients: ["codex", "claude"],
     dryRun: false,
     replaceCredentials: false,
@@ -120,4 +121,49 @@ test("ensureStoredCredentials stores missing or explicitly replaced credentials"
   );
 
   assert.equal(stores, 2);
+});
+
+test("parseSetupArgs accepts an explicit read-only mode", () => {
+  assert.equal(parseSetupArgs(["--read-only"]).allowWrites, false);
+  assert.equal(parseSetupArgs(["--allow-writes"]).allowWrites, true);
+});
+
+function collector(): { write: (chunk: string) => boolean; text: string } {
+  const sink = {
+    text: "",
+    write(chunk: string): boolean {
+      sink.text += chunk;
+      return true;
+    },
+  };
+  return sink;
+}
+
+test("resolveWriteMode honours an explicit flag without asking", () => {
+  const output = collector();
+  const ask = (): string => assert.fail("should not prompt");
+
+  assert.equal(resolveWriteMode(true, true, ask, output), true);
+  assert.equal(resolveWriteMode(false, true, ask, output), false);
+  assert.equal(output.text, "");
+});
+
+test("resolveWriteMode asks interactively and defaults to enabling writes", () => {
+  const output = collector();
+
+  assert.equal(resolveWriteMode(undefined, true, () => "", output), true);
+  assert.equal(resolveWriteMode(undefined, true, () => "y", output), true);
+  assert.equal(resolveWriteMode(undefined, true, () => "ja", output), true);
+  assert.equal(resolveWriteMode(undefined, true, () => "n", output), false);
+  assert.match(output.text, /Enable writes\? \[Y\/n\]/);
+});
+
+test("resolveWriteMode stays read-only when it cannot ask", () => {
+  const output = collector();
+
+  assert.equal(
+    resolveWriteMode(undefined, false, () => assert.fail("should not prompt"), output),
+    false,
+  );
+  assert.match(output.text, /--allow-writes/);
 });
