@@ -1,5 +1,6 @@
 import { SipgateApiError, SipgateClient } from "./sipgate-client.js";
 import type {
+  AuthenticatedUserContext,
   DeviceType,
   ForwardingRule,
   HistoryQuery,
@@ -48,12 +49,29 @@ function encodeId(id: string): string {
 export class SipgateBackend implements TelephonyBackend {
   public constructor(private readonly client: SipgateClient) {}
 
+  public async getAuthenticatedUser(): Promise<AuthenticatedUserContext> {
+    const response = await this.client.request<JsonValue>("/authorization/userinfo");
+    if (!response || Array.isArray(response) || typeof response !== "object") {
+      throw new SipgateApiError("sipgate did not return an authenticated user identity.");
+    }
+    const userId = stringField(response, "sub");
+    if (!userId) {
+      throw new SipgateApiError("sipgate did not return an ID for the authenticated user.");
+    }
+    return { identity: sanitize(response) as JsonObject, userId };
+  }
+
+  public async getUser(userId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(`/users/${encodeId(userId)}`);
+    return sanitize(response ?? {});
+  }
+
   public async getAccountInfo(): Promise<JsonValue> {
     const [account, authenticatedUser] = await Promise.all([
       this.client.request<JsonValue>("/account"),
-      this.client.request<JsonValue>("/authorization/userinfo"),
+      this.getAuthenticatedUser(),
     ]);
-    return sanitize({ account, authenticatedUser });
+    return sanitize({ account, authenticatedUser: authenticatedUser.identity });
   }
 
   public async listUsers(): Promise<JsonValue> {
@@ -65,6 +83,39 @@ export class SipgateBackend implements TelephonyBackend {
     const response = await this.client.request<JsonValue>("/numbers", { query: { offset, limit } });
     const items = asItems(response);
     return sanitize({ items, pagination: { offset, limit, returned: items.length } });
+  }
+
+  public async listPhonelines(userId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(`/${encodeId(userId)}/phonelines`);
+    return sanitize(response ?? { items: [] });
+  }
+
+  public async listUserNumbers(
+    userId: string,
+    { offset, limit }: PaginationInput,
+  ): Promise<JsonValue> {
+    const phonelines = asItems(await this.listPhonelines(userId));
+    const numberGroups = await Promise.all(phonelines.map(async (phoneline) => {
+      const phonelineId = stringField(phoneline, "id");
+      if (!phonelineId) return [];
+      const response = await this.client.request<JsonValue>(
+        `/${encodeId(userId)}/phonelines/${encodeId(phonelineId)}/numbers`,
+      );
+      return asItems(response).map((number) => ({
+        ...number,
+        endpointId: phonelineId,
+        ...(typeof phoneline.alias === "string" ? { endpointAlias: phoneline.alias } : {}),
+      }));
+    }));
+    const uniqueNumbers = [...new Map(numberGroups.flat().map((number) => [
+      stringField(number, "id") ?? stringField(number, "number") ?? JSON.stringify(number),
+      number,
+    ])).values()];
+    const page = uniqueNumbers.slice(offset, offset + limit);
+    return sanitize({
+      items: page,
+      pagination: { offset, limit, returned: page.length, totalCount: uniqueNumbers.length },
+    });
   }
 
   public async listDevices(userId?: string, types?: DeviceType[]): Promise<JsonValue> {
@@ -87,7 +138,9 @@ export class SipgateBackend implements TelephonyBackend {
 
   public async getRouting(userId?: string): Promise<JsonValue> {
     const [numbersResponse, usersResponse] = await Promise.all([
-      this.client.request<JsonValue>("/numbers", { query: { offset: 0, limit: 1000 } }),
+      userId
+        ? Promise.resolve(undefined)
+        : this.client.request<JsonValue>("/numbers", { query: { offset: 0, limit: 1000 } }),
       userId ? Promise.resolve(undefined) : this.client.request<JsonValue>("/users"),
     ]);
     const userIds = userId ? [userId] : asItems(usersResponse)
@@ -95,7 +148,7 @@ export class SipgateBackend implements TelephonyBackend {
       .filter((id): id is string => Boolean(id));
 
     const users = await Promise.all(userIds.map(async (id) => {
-      const phonelinesResponse = await this.client.request<JsonValue>(`/${encodeId(id)}/phonelines`);
+      const phonelinesResponse = await this.listPhonelines(id);
       const phonelines = await Promise.all(asItems(phonelinesResponse).map(async (phoneline) => {
         const phonelineId = stringField(phoneline, "id");
         if (!phonelineId) return { ...phoneline, numbers: [], forwardings: [] };
@@ -106,14 +159,26 @@ export class SipgateBackend implements TelephonyBackend {
         ]);
         return {
           ...phoneline,
-          numbers: asItems(lineNumbers),
+          numbers: asItems(lineNumbers).map((number) => ({
+            ...number,
+            endpointId: phonelineId,
+            ...(typeof phoneline.alias === "string" ? { endpointAlias: phoneline.alias } : {}),
+          })),
           forwardings: asItems(forwardings),
         };
       }));
       return { userId: id, phonelines };
     }));
 
-    return sanitize({ numbers: asItems(numbersResponse), users });
+    const numbers = userId
+      ? users.flatMap(({ phonelines }) => phonelines.flatMap((phoneline) => phoneline.numbers))
+      : asItems(numbersResponse);
+    const uniqueNumbers = [...new Map(numbers.map((number) => [
+      stringField(number, "id") ?? stringField(number, "number") ?? JSON.stringify(number),
+      number,
+    ])).values()];
+
+    return sanitize({ numbers: uniqueNumbers, users });
   }
 
   public async getCallHistory(query: HistoryQuery): Promise<JsonValue> {
@@ -141,7 +206,7 @@ export class SipgateBackend implements TelephonyBackend {
 
   public async getSettings(userId?: string): Promise<JsonValue> {
     const users = userId
-      ? [await this.client.request<JsonValue>(`/users/${encodeId(userId)}`)]
+      ? [await this.getUser(userId)]
       : asItems(await this.client.request<JsonValue>("/users"));
 
     const settings = await Promise.all(users.map(async (userValue) => {
@@ -178,6 +243,20 @@ export class SipgateBackend implements TelephonyBackend {
       body: { endpointId },
     });
     const after = await this.findNumber(numberId);
+    return { before: sanitize(before), after: sanitize(after) };
+  }
+
+  public async setUserNumberRouting(
+    userId: string,
+    numberId: string,
+    endpointId: string,
+  ): Promise<MutationResult> {
+    const before = await this.findUserNumber(userId, numberId);
+    await this.client.request<JsonValue>(`/numbers/${encodeId(numberId)}`, {
+      method: "PUT",
+      body: { endpointId },
+    });
+    const after = await this.findUserNumber(userId, numberId);
     return { before: sanitize(before), after: sanitize(after) };
   }
 
@@ -228,7 +307,7 @@ export class SipgateBackend implements TelephonyBackend {
     const smsId = stringField(extension, "id");
     if (!smsId) throw new SipgateApiError("sipgate returned an SMS extension without an ID.");
 
-    const beforeHistory = await this.latestHistory("SMS", input.recipient);
+    const beforeHistory = await this.latestHistory("SMS", input.recipient, [smsId]);
     await this.client.request<JsonValue>("/sessions/sms", {
       method: "POST",
       body: {
@@ -238,7 +317,7 @@ export class SipgateBackend implements TelephonyBackend {
         ...(input.sendAt === undefined ? {} : { sendAt: input.sendAt }),
       },
     });
-    const afterHistory = await this.latestHistory("SMS", input.recipient);
+    const afterHistory = await this.latestHistory("SMS", input.recipient, [smsId]);
     return {
       before: sanitize({ smsExtension: extension, latestMatchingHistory: beforeHistory }),
       after: sanitize({
@@ -276,6 +355,31 @@ export class SipgateBackend implements TelephonyBackend {
     };
   }
 
+  public async initiateUserCall(input: {
+    caller: string;
+    callee: string;
+    callerId?: string;
+    deviceId?: string;
+  }): Promise<MutationResult> {
+    const session = await this.client.request<JsonValue>("/sessions/calls", {
+      method: "POST",
+      body: {
+        caller: input.caller,
+        callee: input.callee,
+        ...(input.callerId === undefined ? {} : { callerId: input.callerId }),
+        ...(input.deviceId === undefined ? {} : { deviceId: input.deviceId }),
+      },
+    });
+    return {
+      before: null,
+      after: {
+        session: sanitize(session ?? {}),
+        requestAccepted: true,
+        note: "User scope does not read the account-wide active-calls endpoint before or after Click2Dial.",
+      },
+    };
+  }
+
   private async findNumber(numberId: string): Promise<JsonObject> {
     const response = await this.client.request<JsonValue>("/numbers", { query: { offset: 0, limit: 1000 } });
     const number = asItems(response).find((item) => stringField(item, "id") === numberId);
@@ -283,9 +387,21 @@ export class SipgateBackend implements TelephonyBackend {
     return number;
   }
 
-  private async latestHistory(type: "SMS" | "CALL", phoneNumber: string): Promise<JsonValue> {
+  private async findUserNumber(userId: string, numberId: string): Promise<JsonObject> {
+    const response = await this.listUserNumbers(userId, { offset: 0, limit: 1000 });
+    const number = asItems(response).find((item) => stringField(item, "id") === numberId);
+    if (!number) throw new SipgateApiError("The requested sipgate phone number was not found.", 404);
+    return number;
+  }
+
+  private async latestHistory(
+    type: "SMS" | "CALL",
+    phoneNumber: string,
+    connectionIds?: string[],
+  ): Promise<JsonValue> {
     const response = await this.client.request<JsonValue>("/history", {
       query: {
+        connectionIds,
         types: [type],
         directions: ["OUTGOING"],
         phonenumber: phoneNumber,

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { JsonValue, TelephonyBackend } from "../backend/telephony-backend.js";
+import type { AccessScope, JsonValue, TelephonyBackend } from "../backend/telephony-backend.js";
 
 export interface ToolAnnotations {
   readOnlyHint: boolean;
@@ -60,25 +60,33 @@ function define<T extends z.ZodType<Record<string, unknown>>>(options: {
 export function createToolDefinitions(
   backend: TelephonyBackend,
   readonly = false,
+  accessScope: AccessScope = "user",
 ): ToolDefinition[] {
+  const userScoped = accessScope === "user";
   const readTools = [
     define({
       name: "account_info",
-      description: "Return sipgate account data and the authenticated user's identity.",
+      description: userScoped
+        ? "Return the authenticated sipgate user's identity and active MCP access scope."
+        : "Return sipgate account data, the authenticated administrator's identity, and active MCP access scope.",
       schema: z.object({}),
       annotations: readAnnotations,
       execute: async () => backend.getAccountInfo(),
     }),
     define({
       name: "list_users",
-      description: "List all users in the sipgate account, including IDs used by other tools.",
+      description: userScoped
+        ? "Return only the authenticated sipgate user, including the ID used by other tools."
+        : "List all users in the sipgate account, including IDs used by other tools.",
       schema: z.object({}),
       annotations: readAnnotations,
       execute: async () => backend.listUsers(),
     }),
     define({
       name: "list_numbers",
-      description: "List sipgate phone numbers and their current endpoint assignments.",
+      description: userScoped
+        ? "List phone numbers assigned to the authenticated user's phonelines and their endpoint assignments."
+        : "List all sipgate phone numbers and their current endpoint assignments.",
       schema: z.object({
         offset: z.int().min(0).default(0).describe("Zero-based pagination offset"),
         limit: z.int().min(1).max(1000).default(1000).describe("Maximum number of phone numbers"),
@@ -88,9 +96,13 @@ export function createToolDefinitions(
     }),
     define({
       name: "list_devices",
-      description: "List phones and devices with owner, active routing, DND, and online/register status. Without user_id, all users are queried.",
+      description: userScoped
+        ? "List the authenticated user's phones and devices with active routing, DND, and online/register status."
+        : "List phones and devices with owner, active routing, DND, and online/register status. Without user_id, all users are queried.",
       schema: z.object({
-        user_id: id.optional().describe("Limit results to one sipgate user ID, for example w0"),
+        user_id: id.optional().describe(userScoped
+          ? "Optional authenticated sipgate user ID; another user's ID is rejected"
+          : "Limit results to one sipgate user ID, for example w0"),
         types: z.array(z.enum(["all", "app", "register", "mobile", "external"])).min(1).optional()
           .describe("Optional sipgate device-type filters"),
       }),
@@ -99,16 +111,22 @@ export function createToolDefinitions(
     }),
     define({
       name: "get_routing",
-      description: "Return number-to-endpoint routing plus each user's phonelines, assigned numbers, and active or timeout forwardings.",
+      description: userScoped
+        ? "Return the authenticated user's number-to-endpoint routing, phonelines, assigned numbers, and active or timeout forwardings."
+        : "Return account-wide number-to-endpoint routing plus each user's phonelines, assigned numbers, and active or timeout forwardings.",
       schema: z.object({
-        user_id: id.optional().describe("Limit phoneline forwarding details to one sipgate user ID"),
+        user_id: id.optional().describe(userScoped
+          ? "Optional authenticated sipgate user ID; another user's ID is rejected"
+          : "Limit phoneline forwarding details to one sipgate user ID"),
       }),
       annotations: readAnnotations,
       execute: async ({ user_id }) => backend.getRouting(user_id),
     }),
     define({
       name: "call_history",
-      description: "List paginated call history with optional direction, time-range, number, and connection filters.",
+      description: userScoped
+        ? "List the authenticated user's paginated call history with optional direction, time-range, number, and owned-connection filters."
+        : "List account-wide paginated call history with optional direction, time-range, number, and connection filters.",
       schema: z.object({
         directions: z.array(z.enum(["INCOMING", "OUTGOING", "MISSED_INCOMING", "MISSED_OUTGOING"])).min(1).optional(),
         from: isoDateTime.optional().describe("Inclusive ISO 8601 start date-time"),
@@ -136,9 +154,13 @@ export function createToolDefinitions(
     }),
     define({
       name: "get_settings",
-      description: "Return relevant user reachability settings, device availability/DND state, and phoneline voicemail activation and timeout settings.",
+      description: userScoped
+        ? "Return the authenticated user's reachability settings, device availability/DND state, and phoneline voicemail activation and timeout settings."
+        : "Return relevant account-user reachability settings, device availability/DND state, and phoneline voicemail activation and timeout settings.",
       schema: z.object({
-        user_id: id.optional().describe("Limit settings to one sipgate user ID"),
+        user_id: id.optional().describe(userScoped
+          ? "Optional authenticated sipgate user ID; another user's ID is rejected"
+          : "Limit settings to one sipgate user ID"),
       }),
       annotations: readAnnotations,
       execute: async ({ user_id }) => backend.getSettings(user_id),
@@ -150,7 +172,9 @@ export function createToolDefinitions(
   const writeTools = [
     define({
       name: "set_number_routing",
-      description: "CHANGES THE SIPGATE ACCOUNT: route a phone number to a sipgate endpoint ID (for example a phoneline). Reads and returns the number's before/after state.",
+      description: userScoped
+        ? "CHANGES THE AUTHENTICATED USER'S SIPGATE SETTINGS: route one of that user's assigned phone numbers to one of that user's phonelines. Reads and returns before/after state."
+        : "CHANGES THE SIPGATE ACCOUNT: route a phone number to a sipgate endpoint ID (for example a phoneline). Reads and returns the number's before/after state.",
       schema: z.object({
         number_id: id.describe("Phone-number ID returned by list_numbers"),
         endpoint_id: id.describe("Destination endpoint ID accepted by sipgate, for example p0"),
@@ -160,9 +184,13 @@ export function createToolDefinitions(
     }),
     define({
       name: "set_forwarding",
-      description: "CHANGES THE SIPGATE ACCOUNT: replace all forwardings for a phoneline, including timeout routing. Pass an empty forwardings array to delete all forwardings. Reads and returns before/after state.",
+      description: userScoped
+        ? "CHANGES THE AUTHENTICATED USER'S SIPGATE SETTINGS: replace all forwardings for one of that user's phonelines, including timeout routing. Pass [] to delete all forwardings. Returns before/after state."
+        : "CHANGES THE SIPGATE ACCOUNT: replace all forwardings for a phoneline, including timeout routing. Pass an empty forwardings array to delete all forwardings. Reads and returns before/after state.",
       schema: z.object({
-        user_id: id.describe("Owner user ID, for example w0"),
+        user_id: id.describe(userScoped
+          ? "Authenticated sipgate user ID; another user's ID is rejected"
+          : "Owner user ID, for example w0"),
         phoneline_id: id.describe("Phoneline ID, for example p0"),
         forwardings: z.array(z.object({
           active: z.boolean().default(true),
@@ -176,7 +204,9 @@ export function createToolDefinitions(
     }),
     define({
       name: "set_dnd",
-      description: "CHANGES THE SIPGATE ACCOUNT: enable or disable Do Not Disturb for one device. Reads and returns the device's before/after state.",
+      description: userScoped
+        ? "CHANGES THE AUTHENTICATED USER'S SIPGATE SETTINGS: enable or disable Do Not Disturb for one of that user's devices. Returns before/after state."
+        : "CHANGES THE SIPGATE ACCOUNT: enable or disable Do Not Disturb for one device. Reads and returns the device's before/after state.",
       schema: z.object({
         device_id: id.describe("Device ID returned by list_devices"),
         enabled: z.boolean(),
@@ -186,9 +216,13 @@ export function createToolDefinitions(
     }),
     define({
       name: "send_sms",
-      description: "CHANGES THE SIPGATE ACCOUNT AND MAY INCUR CHARGES: send an SMS after verifying an SMS-capable extension. Reads and returns the relevant before/after history snapshot; history can update asynchronously.",
+      description: userScoped
+        ? "MAY INCUR CHARGES: send an SMS from the authenticated user's verified SMS-capable extension. Returns the relevant before/after history snapshot; history can update asynchronously."
+        : "CHANGES THE SIPGATE ACCOUNT AND MAY INCUR CHARGES: send an SMS after verifying an SMS-capable extension. Reads and returns the relevant before/after history snapshot; history can update asynchronously.",
       schema: z.object({
-        user_id: id.describe("Owner of the SMS extension"),
+        user_id: id.describe(userScoped
+          ? "Authenticated sipgate user ID; another user's ID is rejected"
+          : "Owner of the SMS extension"),
         sms_id: id.optional().describe("SMS extension ID; the first available extension is used when omitted"),
         recipient: e164,
         message: z.string().min(1),
@@ -205,7 +239,9 @@ export function createToolDefinitions(
     }),
     define({
       name: "initiate_call",
-      description: "CHANGES THE SIPGATE ACCOUNT AND MAY INCUR CHARGES: start a Click2Dial call. Reads established calls before and after and returns the new session; ringing calls may not appear immediately.",
+      description: userScoped
+        ? "MAY INCUR CHARGES: start a Click2Dial call from the authenticated user's verified device or phone number. Returns before/after call state and the new session."
+        : "CHANGES THE SIPGATE ACCOUNT AND MAY INCUR CHARGES: start a Click2Dial call. Reads established calls before and after and returns the new session; ringing calls may not appear immediately.",
       schema: z.object({
         caller: id.describe("sipgate device ID or caller phone number"),
         callee: e164,

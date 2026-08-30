@@ -5,7 +5,7 @@ import {
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import type { TelephonyBackend } from "./backend/telephony-backend.js";
+import type { AccessScope, TelephonyBackend } from "./backend/telephony-backend.js";
 import { createToolDefinitions } from "./tools/definitions.js";
 
 function publicError(error: unknown): string {
@@ -28,12 +28,21 @@ function jsonSchemaFor(schema: z.ZodType<Record<string, unknown>>): Tool["inputS
   return inputSchema as Tool["inputSchema"];
 }
 
-export function createServer(backend: TelephonyBackend, readonly = false): Server {
-  const definitions = createToolDefinitions(backend, readonly);
+export function createServer(
+  backend: TelephonyBackend,
+  readonly = false,
+  accessScope: AccessScope = "user",
+): Server {
+  const definitions = createToolDefinitions(backend, readonly, accessScope);
   const byName = new Map(definitions.map((definition) => [definition.name, definition]));
   const server = new Server(
-    { name: "sipgate-mcp", version: "0.1.0" },
-    { capabilities: { tools: {} } },
+    { name: "sipgate-mcp", version: "0.2.0" },
+    {
+      capabilities: { tools: {} },
+      instructions: accessScope === "user"
+        ? `This sipgate MCP is restricted to the authenticated user's resources. ${readonly ? "It is read-only and cannot change the account." : "It may change that user's telephony settings or initiate chargeable actions when explicitly requested."} Never request or infer another user's ID.`
+        : `This sipgate MCP has account scope and the authenticated sipgate user was verified as an administrator. ${readonly ? "It is read-only and cannot change the account." : "It may change account-wide telephony settings or initiate chargeable actions when explicitly requested."}`,
+    },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({

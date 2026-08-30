@@ -8,18 +8,24 @@ import { createServer } from "../src/server.js";
 function backend(): TelephonyBackend {
   const mutation = async () => ({ before: null, after: null });
   return {
+    getAuthenticatedUser: async () => ({ identity: { sub: "w0" }, userId: "w0" }),
+    getUser: async (userId) => ({ id: userId, admin: true }),
     getAccountInfo: async () => ({ account: { company: "Example" } }),
     listUsers: async () => ({ items: [] }),
     listNumbers: async () => ({ items: [] }),
+    listUserNumbers: async () => ({ items: [] }),
+    listPhonelines: async () => ({ items: [] }),
     listDevices: async () => ({ items: [] }),
     getRouting: async () => ({ numbers: [], users: [] }),
     getCallHistory: async () => ({ items: [] }),
     getSettings: async () => ({ users: [] }),
     setNumberRouting: mutation,
+    setUserNumberRouting: mutation,
     setForwarding: mutation,
     setDnd: mutation,
     sendSms: mutation,
     initiateCall: mutation,
+    initiateUserCall: mutation,
   };
 }
 
@@ -34,10 +40,30 @@ test("MCP server lists JSON-schema tools and executes a tool over the SDK transp
     const listed = await client.listTools();
     assert.equal(listed.tools.length, 12);
     assert.equal(listed.tools.find((tool) => tool.name === "call_history")?.inputSchema.type, "object");
+    assert.equal(client.getServerVersion()?.version, "0.2.0");
+    assert.match(client.getInstructions() ?? "", /authenticated user's resources/);
 
     const result = await client.callTool({ name: "account_info", arguments: {} });
     assert.equal(result.isError, undefined);
     assert.match(JSON.stringify(result.content), /Example/);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test("MCP server advertises administrator account scope and read-only mode", async () => {
+  const server = createServer(backend(), true, "account");
+  const client = new Client({ name: "test-client", version: "1.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+
+  try {
+    assert.match(client.getInstructions() ?? "", /account scope/);
+    assert.match(client.getInstructions() ?? "", /administrator/);
+    assert.match(client.getInstructions() ?? "", /read-only/);
+    assert.equal((await client.listTools()).tools.length, 7);
   } finally {
     await client.close();
     await server.close();

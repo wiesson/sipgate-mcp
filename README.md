@@ -2,6 +2,10 @@
 
 `sipgate-mcp` is an open-source, self-hosted Model Context Protocol server for inspecting and configuring a sipgate account. It exposes the sipgate REST API v2 as focused tools for agents such as Claude Code, Claude Desktop, and Codex.
 
+Version 0.2 defaults to user-scoped access: tools are constrained to the
+authenticated sipgate user's resources. Account-wide access is an explicit
+administrator-only mode.
+
 The server uses stdio only. It does not start an HTTP server or route credentials
 through a third-party service. It sends authentication only from the local MCP
 process directly to `https://api.sipgate.com/v2`.
@@ -12,8 +16,7 @@ process directly to `https://api.sipgate.com/v2`.
 - A sipgate account with a Personal Access Token (PAT)
 - An MCP client with stdio support
 
-After the first npm release, install the command globally with any of the
-supported package managers:
+Install the command globally with any of the supported package managers:
 
 ```bash
 npm install --global sipgate-mcp
@@ -26,13 +29,12 @@ Then start it with:
 ```bash
 export SIPGATE_TOKEN_ID="your-token-id"
 export SIPGATE_TOKEN="your-token"
+export SIPGATE_MCP_SCOPE="user"
 sipgate-mcp
 ```
 
 For clients that manage MCP commands on demand, `npx -y sipgate-mcp` remains
-supported without a global installation. The package name was available when
-checked on 2026-08-30; this repository is configured for `sipgate-mcp`, but the
-initial npm publish still needs to be completed.
+supported without a global installation.
 
 ## Create a Personal Access Token
 
@@ -45,30 +47,58 @@ sipgate PAT authentication uses HTTP Basic Auth with `token-id:token` as the cre
 
 Do not put either value in this repository, an MCP config committed to source control, command output, or an issue report.
 
+## MCP access scopes
+
+`SIPGATE_MCP_SCOPE` controls the resource boundary enforced by the MCP in
+addition to sipgate's own user role and PAT scopes:
+
+| Value | Behavior |
+| --- | --- |
+| `user` (default) | Resolves the authenticated user through `/authorization/userinfo`; returns only that user and their assigned numbers; forces user-specific device, routing, and settings reads; constrains call history to owned connection IDs; and validates every write target against owned numbers, phonelines, or devices. |
+| `account` | Enables account-wide reads and writes. Startup fails unless `/users/{authenticatedUserId}` reports `admin: true`. Requires `users:read` for the administrator check. |
+
+Token scopes are permission ceilings, not role elevation. For example,
+`numbers:write` does not turn a regular sipgate user into an administrator.
+The effective permission is the intersection of the sipgate user role, PAT
+scopes, MCP access scope, and read-only mode.
+
+Use account scope only when account-wide administration is intended:
+
+```bash
+export SIPGATE_MCP_SCOPE="account"
+npx -y sipgate-mcp
+```
+
 ## Tools and PAT scopes
 
-The table lists the non-`all` scopes named by sipgate's live Swagger document, plus scopes required by this server's pre/post state reads. sipgate also exposes broader parent scopes such as `sessions:write`; select the listed specific and parent scopes offered by the PAT UI when in doubt.
+Every mode identifies the authenticated user with `GET /authorization/userinfo`.
+The table lists the non-`all` scopes named by sipgate's live Swagger document,
+including ownership checks performed in user scope and pre/post state reads.
+sipgate also exposes broader parent scopes such as `sessions:write`; select the
+listed specific and parent scopes offered by the PAT UI when in doubt.
 
 | Tool | Access | sipgate API calls | PAT scopes |
 | --- | --- | --- | --- |
-| `account_info` | Read | `GET /account`, `GET /authorization/userinfo` | `account:read` (`userinfo` has no scope declaration in Swagger) |
-| `list_users` | Read | `GET /users` | `users:read` |
-| `list_numbers` | Read | `GET /numbers` | `numbers:read` |
-| `list_devices` | Read | `GET /users`, `GET /{userId}/devices` | `devices:read`; `users:read` when `user_id` is omitted |
-| `get_routing` | Read | `GET /numbers`, `GET /users`, `GET /{userId}/phonelines`, `GET /{userId}/phonelines/{phonelineId}/numbers`, `GET /{userId}/phonelines/{phonelineId}/forwardings` | `numbers:read`, `phonelines:read`, `phonelines:numbers:read`, `phonelines:forwardings:read`; `users:read` when `user_id` is omitted |
-| `call_history` | Read | `GET /history` | `history:read` |
+| `account_info` | Read | User: cached `/authorization/userinfo`; account: plus `GET /account` | Account: `account:read` (`userinfo` has no scope declaration in Swagger) |
+| `list_users` | Read | User: `GET /users/{self}`; account: `GET /users` | `users:read` |
+| `list_numbers` | Read | User: `GET /{self}/phonelines` and each phoneline's `/numbers`; account: `GET /numbers` | User: `phonelines:read`, `phonelines:numbers:read`; account: `numbers:read` |
+| `list_devices` | Read | User: `GET /{self}/devices`; account: `GET /users`, `GET /{userId}/devices` | `devices:read`; account also needs `users:read` when `user_id` is omitted |
+| `get_routing` | Read | User: own phonelines, numbers, and forwardings; account: also `GET /numbers` and `GET /users` | `phonelines:read`, `phonelines:numbers:read`, `phonelines:forwardings:read`; account also needs `numbers:read` and, when `user_id` is omitted, `users:read` |
+| `call_history` | Read | User: ownership reads for own phonelines/devices, then filtered `GET /history`; account: `GET /history` | `history:read`; user also needs `phonelines:read`, `devices:read` |
 | `get_settings` | Read | `GET /users[/userId]`, `GET /{userId}/devices`, `GET /{userId}/phonelines[/phonelineId]` | `users:read`, `devices:read`, `phonelines:read` |
-| `set_number_routing` | Write | pre/post `GET /numbers`, `PUT /numbers/{numberId}` | `numbers:read`, `numbers:write` |
-| `set_forwarding` | Write | pre/post `GET /{userId}/phonelines/{phonelineId}/forwardings`, `PUT` to the same path | `phonelines:read`, `phonelines:write`, `phonelines:forwardings:read`, `phonelines:forwardings:write` |
-| `set_dnd` | Write | pre/post `GET /devices/{deviceId}`, `PUT /devices/{deviceId}` | `devices:read`, `devices:write` |
+| `set_number_routing` | Write | User: pre/post reads through own phonelines; account: pre/post `GET /numbers`; all modes: `PUT /numbers/{numberId}` | `numbers:write`; user also needs `phonelines:read`, `phonelines:numbers:read`; account needs `numbers:read` |
+| `set_forwarding` | Write | User: phoneline ownership read; then pre/post forwarding reads and `PUT` | `phonelines:read`, `phonelines:write`, `phonelines:forwardings:read`, `phonelines:forwardings:write` |
+| `set_dnd` | Write | User: device ownership read; then pre/post `GET /devices/{deviceId}` and `PUT` | `devices:read`, `devices:write` |
 | `send_sms` | Write/action | `GET /{userId}/sms`, pre/post `GET /history`, `POST /sessions/sms` | `sms:read`, `history:read`, `sessions:write`, `sessions:sms:write` |
-| `initiate_call` | Write/action | pre/post `GET /calls`, `POST /sessions/calls` | `rtcm:read`, `sessions:write`, `sessions:calls:write` |
+| `initiate_call` | Write/action | User: device/number ownership reads, then `POST /sessions/calls`; account: pre/post `GET /calls` plus `POST` | `sessions:write`, `sessions:calls:write`; user also needs `devices:read`, `phonelines:read`, `phonelines:numbers:read`; account needs `rtcm:read` |
 
 Every write tool reads current state first and returns a JSON object with `before` and `after`. SMS history can update asynchronously, and `/calls` only contains established calls, so those action snapshots also include an acceptance/session marker.
 
 ### Tool notes
 
 - `list_devices` resolves devices through users because the documented account-wide route is `GET /{userId}/devices`; the live v2 Swagger document does not define `GET /devices`.
+- User scope resolves assigned numbers through the authenticated user's phonelines and never calls account-wide `GET /users` or `GET /numbers` for read tools.
+- User-scoped number-routing snapshots are also resolved through owned phonelines, and user-scoped Click2Dial deliberately omits account-wide `/calls` snapshots.
 - Number routing uses sipgate's documented `endpointId`. Obtain existing IDs from the read tools; a phoneline ID such as `p0` is the documented example.
 - `set_forwarding` replaces the complete phoneline forwarding list. Pass `forwardings: []` to remove all forwardings. A `timeout` of `0` represents immediate forwarding.
 - `send_sms` refuses to post unless `GET /{userId}/sms` returns the requested (or first available) SMS extension.
@@ -80,6 +110,7 @@ Set `SIPGATE_MCP_READONLY=1` to register only the seven read tools. Write tools 
 
 ```bash
 export SIPGATE_MCP_READONLY=1
+export SIPGATE_MCP_SCOPE=user
 npx -y sipgate-mcp
 ```
 
@@ -95,12 +126,13 @@ Claude Code expands `${VAR}` references in MCP environment entries. Single quote
 claude mcp add \
   --env 'SIPGATE_TOKEN_ID=${SIPGATE_TOKEN_ID}' \
   --env 'SIPGATE_TOKEN=${SIPGATE_TOKEN}' \
+  --env SIPGATE_MCP_SCOPE=user \
   --transport stdio \
   --scope user \
   sipgate -- npx -y sipgate-mcp
 ```
 
-Add `--env SIPGATE_MCP_READONLY=1` before `--transport` for read-only mode. Verify the connection with `claude mcp get sipgate`. See the official [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp).
+Add `--env SIPGATE_MCP_READONLY=1` before `--transport` for read-only mode. Replace the scope with `account` only for deliberate administrator access. Verify the connection with `claude mcp get sipgate`. See the official [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp).
 
 ### Claude Desktop
 
@@ -127,18 +159,22 @@ Codex can forward named variables from its local environment without storing the
 [mcp_servers.sipgate]
 command = "npx"
 args = ["-y", "sipgate-mcp"]
-env_vars = ["SIPGATE_TOKEN_ID", "SIPGATE_TOKEN", "SIPGATE_MCP_READONLY"]
+env_vars = ["SIPGATE_TOKEN_ID", "SIPGATE_TOKEN", "SIPGATE_MCP_SCOPE", "SIPGATE_MCP_READONLY"]
 ```
 
 Export the variables before starting Codex, then use `/mcp` or `codex mcp list` to confirm the server. The `env_vars` forwarding form is documented in the [official OpenAI MCP documentation](https://developers.openai.com/codex/mcp/).
 
 ## Manual smoke test with MCP Inspector
 
-This test makes real sipgate API calls. Start with a PAT containing only `account:read` and `numbers:read`, plus the required environment variables:
+This test makes real sipgate API calls. Start in user/read-only mode with a PAT
+containing `phonelines:read` and `phonelines:numbers:read`, plus the required
+environment variables:
 
 ```bash
 export SIPGATE_TOKEN_ID="your-token-id"
 export SIPGATE_TOKEN="your-token"
+export SIPGATE_MCP_SCOPE="user"
+export SIPGATE_MCP_READONLY=1
 npx @modelcontextprotocol/inspector npx -y sipgate-mcp
 ```
 
@@ -158,10 +194,11 @@ The MCP layer depends only on the backend interface:
 ```text
 MCP stdio server
   -> validated tool definitions (Zod)
-    -> TelephonyBackend
-      -> SipgateBackend (v1 implementation)
-        -> SipgateClient
-          -> native fetch -> https://api.sipgate.com/v2
+    -> user/account access policy
+      -> TelephonyBackend
+        -> SipgateBackend
+          -> SipgateClient
+            -> native fetch -> https://api.sipgate.com/v2
 ```
 
 `TelephonyBackend` contains the stable, provider-neutral operations. `SipgateBackend` is the only v1 implementation, so a future second telephony provider can reuse the same MCP tool surface.
@@ -169,6 +206,8 @@ MCP stdio server
 ## Security
 
 - PAT values are read only from `SIPGATE_TOKEN_ID` and `SIPGATE_TOKEN`.
+- User scope is the default and validates user IDs plus number, phoneline, device, call, and history ownership before delegation.
+- Account scope fails startup unless the authenticated sipgate user reports `admin: true`.
 - The Basic Auth header exists only in memory and is sent only to the fixed sipgate API base URL.
 - API error bodies are discarded. User-facing errors never include request headers, response bodies, or credentials.
 - Potentially sensitive response properties such as `credentials`, `password`, `token`, and `secret` are redacted before tool output.
@@ -184,7 +223,7 @@ npm run build
 npm test
 ```
 
-Tests use `node:test` and mocked `fetch`; they never call the real sipgate API. The suite includes client authentication/error behavior, exact critical write payloads, credential redaction, one test per MCP tool, and read-only registration.
+Tests use `node:test` and mocked `fetch`; they never call the real sipgate API. The suite includes client authentication/error behavior, user/account access-policy enforcement, exact critical write payloads, credential redaction, one test per MCP tool, and read-only registration.
 
 ## Releases
 
@@ -203,8 +242,9 @@ The endpoint paths, query parameters, request bodies, response models, and scope
 
 ## Roadmap
 
-- v1: local self-hosted stdio server (this release)
-- v2: optional remote deployment, including a Cloudflare Workers backend, without changing the MCP tool surface
+- v0.1: local self-hosted stdio server and sipgate REST API tools
+- v0.2: user-scoped access by default plus explicit administrator-only account scope
+- Future: optional remote deployment, including a Cloudflare Workers backend, without changing the MCP tool surface
 - Additional `TelephonyBackend` implementation(s)
 - Product-aware Click2Dial behavior for classic and Neo PBX accounts
 

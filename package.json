@@ -1,6 +1,6 @@
 {
   "name": "sipgate-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A self-hosted MCP server for configuring sipgate accounts through the sipgate REST API v2",
   "type": "module",
   "bin": {
@@ -17,6 +17,7 @@
   "files": [
     "dist",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {

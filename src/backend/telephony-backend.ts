@@ -2,6 +2,13 @@ export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
 
+export type AccessScope = "user" | "account";
+
+export interface AuthenticatedUserContext {
+  identity: JsonObject;
+  userId: string;
+}
+
 export type HistoryDirection =
   | "INCOMING"
   | "OUTGOING"
@@ -39,14 +46,23 @@ export interface MutationResult {
 }
 
 export interface TelephonyBackend {
+  getAuthenticatedUser(): Promise<AuthenticatedUserContext>;
+  getUser(userId: string): Promise<JsonValue>;
   getAccountInfo(): Promise<JsonValue>;
   listUsers(): Promise<JsonValue>;
   listNumbers(pagination: PaginationInput): Promise<JsonValue>;
+  listUserNumbers(userId: string, pagination: PaginationInput): Promise<JsonValue>;
+  listPhonelines(userId: string): Promise<JsonValue>;
   listDevices(userId?: string, types?: DeviceType[]): Promise<JsonValue>;
   getRouting(userId?: string): Promise<JsonValue>;
   getCallHistory(query: HistoryQuery): Promise<JsonValue>;
   getSettings(userId?: string): Promise<JsonValue>;
   setNumberRouting(numberId: string, endpointId: string): Promise<MutationResult>;
+  setUserNumberRouting(
+    userId: string,
+    numberId: string,
+    endpointId: string,
+  ): Promise<MutationResult>;
   setForwarding(
     userId: string,
     phonelineId: string,
@@ -61,6 +77,12 @@ export interface TelephonyBackend {
     sendAt?: number;
   }): Promise<MutationResult>;
   initiateCall(input: {
+    caller: string;
+    callee: string;
+    callerId?: string;
+    deviceId?: string;
+  }): Promise<MutationResult>;
+  initiateUserCall(input: {
     caller: string;
     callee: string;
     callerId?: string;

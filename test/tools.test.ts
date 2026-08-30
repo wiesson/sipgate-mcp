@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
+  AuthenticatedUserContext,
   DeviceType,
   ForwardingRule,
   HistoryQuery,
@@ -24,9 +25,17 @@ class FakeBackend implements TelephonyBackend {
     return Promise.resolve({ before: { value: "before" }, after: { value: "after" } });
   }
 
+  getAuthenticatedUser(): Promise<AuthenticatedUserContext> {
+    return Promise.resolve({ identity: { sub: "w0" }, userId: "w0" });
+  }
+  getUser(userId: string): Promise<JsonValue> { return this.read("getUser", userId); }
   getAccountInfo(): Promise<JsonValue> { return this.read("getAccountInfo"); }
   listUsers(): Promise<JsonValue> { return this.read("listUsers"); }
   listNumbers(input: PaginationInput): Promise<JsonValue> { return this.read("listNumbers", input); }
+  listUserNumbers(userId: string, input: PaginationInput): Promise<JsonValue> {
+    return this.read("listUserNumbers", userId, input);
+  }
+  listPhonelines(userId: string): Promise<JsonValue> { return this.read("listPhonelines", userId); }
   listDevices(userId?: string, types?: DeviceType[]): Promise<JsonValue> {
     return this.read("listDevices", userId, types);
   }
@@ -35,6 +44,9 @@ class FakeBackend implements TelephonyBackend {
   getSettings(userId?: string): Promise<JsonValue> { return this.read("getSettings", userId); }
   setNumberRouting(numberId: string, endpointId: string): Promise<MutationResult> {
     return this.write("setNumberRouting", numberId, endpointId);
+  }
+  setUserNumberRouting(userId: string, numberId: string, endpointId: string): Promise<MutationResult> {
+    return this.write("setUserNumberRouting", userId, numberId, endpointId);
   }
   setForwarding(userId: string, phonelineId: string, forwardings: ForwardingRule[]): Promise<MutationResult> {
     return this.write("setForwarding", userId, phonelineId, forwardings);
@@ -55,6 +67,12 @@ class FakeBackend implements TelephonyBackend {
     callerId?: string;
     deviceId?: string;
   }): Promise<MutationResult> { return this.write("initiateCall", input); }
+  initiateUserCall(input: {
+    caller: string;
+    callee: string;
+    callerId?: string;
+    deviceId?: string;
+  }): Promise<MutationResult> { return this.write("initiateUserCall", input); }
 }
 
 async function invoke(backend: FakeBackend, name: string, input: unknown): Promise<JsonValue> {
