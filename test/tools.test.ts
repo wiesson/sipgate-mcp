@@ -119,6 +119,7 @@ class FakeBackend implements TelephonyBackend {
   getRouting(userId?: string): Promise<JsonValue> { return this.read("getRouting", userId); }
   getCallHistory(query: HistoryQuery): Promise<JsonValue> { return this.read("getCallHistory", query); }
   getHistoryEntry(entryId: string): Promise<JsonValue> { return this.read("getHistoryEntry", entryId); }
+  listSmsExtensions(userId: string): Promise<JsonValue> { return this.read("listSmsExtensions", userId); }
   listCalls(): Promise<JsonValue> { return this.read("listCalls"); }
   listNotifications(userId: string): Promise<JsonValue> {
     return this.read("listNotifications", userId);

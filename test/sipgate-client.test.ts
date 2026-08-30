@@ -91,3 +91,29 @@ test("SipgateClient converts network failures into a credential-safe error", asy
     return true;
   });
 });
+
+test("SipgateClient passes through sipgate's own plain-text denial reason", async () => {
+  const fetchMock = (async () => new Response(
+    "This endpoint requires a sipgate Classic PBX Account",
+    { status: 403 },
+  )) as typeof fetch;
+  const client = new SipgateClient({ tokenId: "id", token: "secret", fetch: fetchMock });
+
+  await assert.rejects(
+    client.request("/w0/phonelines"),
+    /sipgate says: This endpoint requires a sipgate Classic PBX Account/,
+  );
+});
+
+test("SipgateClient does not pass through a structured error body", async () => {
+  const fetchMock = (async () => new Response(
+    JSON.stringify({ token: "secret-value" }),
+    { status: 403 },
+  )) as typeof fetch;
+  const client = new SipgateClient({ tokenId: "id", token: "secret", fetch: fetchMock });
+
+  await assert.rejects(client.request("/w0/phonelines"), (error: Error) => {
+    assert.doesNotMatch(error.message, /secret-value/);
+    return true;
+  });
+});

@@ -74,6 +74,7 @@ class FakeBackend implements TelephonyBackend {
   public addresses: JsonValue = {
     items: [{ addressId: "123" }, { addressId: "999" }],
   };
+  public smsExtensions: JsonValue = { items: [{ id: "s0", alias: "SMS" }] };
   public activeCalls: JsonValue = {
     data: [
       {
@@ -142,6 +143,9 @@ class FakeBackend implements TelephonyBackend {
         totalCount: numbers.length,
       },
     });
+  }
+  listSmsExtensions(userId: string): Promise<JsonValue> {
+    return this.record("listSmsExtensions", [userId], this.smsExtensions);
   }
   getHistoryEntry(entryId: string): Promise<JsonValue> {
     return this.record("getHistoryEntry", [entryId], {
@@ -225,8 +229,9 @@ class FakeBackend implements TelephonyBackend {
   getRouting(userId?: string): Promise<JsonValue> {
     return this.record("getRouting", [userId], this.routing);
   }
+  public history: JsonValue = { items: [{ id: "h0" }] };
   getCallHistory(query: HistoryQuery): Promise<JsonValue> {
-    return this.record("getCallHistory", [query], { items: [{ id: "h0" }] });
+    return this.record("getCallHistory", [query], this.history);
   }
   listCalls(): Promise<JsonValue> { return this.record("listCalls", [], this.activeCalls); }
   listNotifications(userId: string): Promise<JsonValue> {
@@ -675,7 +680,7 @@ test("user scope constrains call history to owned connection IDs", async () => {
   const historyCall = delegate.calls.find((call) => call.method === "getCallHistory");
   assert.ok(historyCall);
   const query = historyCall.args[0] as HistoryQuery;
-  assert.deepEqual(new Set(query.connectionIds), new Set(["p0", "e0"]));
+  assert.deepEqual(new Set(query.connectionIds), new Set(["p0", "f0", "s0"]));
 
   await assert.rejects(
     backend.getCallHistory({ offset: 0, limit: 25, connectionIds: ["foreign"] }),
@@ -726,7 +731,7 @@ test("user-scope bulk history delete expands to owned connection entries", async
   assert.equal(historyCalls.length, 2);
   for (const call of historyCalls) {
     const query = call.args[0] as HistoryQuery;
-    assert.deepEqual(new Set(query.connectionIds), new Set(["p0", "e0"]));
+    assert.deepEqual(new Set(query.connectionIds), new Set(["p0", "f0", "s0"]));
     assert.deepEqual(query.types, ["CALL", "VOICEMAIL", "SMS", "FAX"]);
   }
   assert.deepEqual(delegate.calls.find((call) => call.method === "deleteHistoryEntries"), {
@@ -870,7 +875,7 @@ test("account scope requires an administrator and preserves account-wide operati
     call.method === "deleteAutorecordingGreeting"), true);
 });
 
-test("user scope scopes call history to devices when the account has no phonelines", async () => {
+test("user scope never sends device IDs as history connection filters", async () => {
   const backend = new FakeBackend();
   backend.routing = { numbers: [], users: [{ userId: "w0", phonelines: [] }] };
   const scoped = await createAccessControlledBackend(backend, "user");
@@ -880,7 +885,34 @@ test("user scope scopes call history to devices when the account has no phonelin
   const historyCall = backend.calls.find((call) => call.method === "getCallHistory");
   assert.ok(historyCall, "expected the history request to reach the delegate");
   const query = historyCall?.args[0] as HistoryQuery;
-  assert.deepEqual(query.connectionIds, ["e0"]);
+  // sipgate answers 403 for a device ID here; only real extensions are valid.
+  assert.deepEqual(new Set(query.connectionIds), new Set(["f0", "s0"]));
+});
+
+test("user scope filters unfiltered history by owned numbers when no extension exists", async () => {
+  const backend = new FakeBackend();
+  backend.routing = {
+    numbers: [{ id: "n0", number: "+49211123456" }],
+    users: [{ userId: "w0", phonelines: [] }],
+  };
+  backend.smsExtensions = { items: [] };
+  backend.faxlines = { items: [] };
+  backend.history = {
+    items: [
+      { id: "h0", source: "+49211123456", target: "+4915799912345" },
+      { id: "h9", source: "+49302222222", target: "+49303333333" },
+    ],
+  };
+  const scoped = await createAccessControlledBackend(backend, "user");
+
+  const result = await scoped.getCallHistory({ offset: 0, limit: 10 }) as {
+    items: Array<{ id: string }>;
+  };
+
+  const historyCall = backend.calls.find((call) => call.method === "getCallHistory");
+  const query = historyCall?.args[0] as HistoryQuery;
+  assert.equal(query.connectionIds, undefined);
+  assert.deepEqual(result.items.map((entry) => entry.id), ["h0"]);
 });
 
 test("user scope accepts an owned device as routing destination without phonelines", async () => {

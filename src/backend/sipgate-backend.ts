@@ -643,6 +643,13 @@ export class SipgateBackend implements TelephonyBackend {
     return sanitize({ numbers: uniqueNumbers, users });
   }
 
+  public async listSmsExtensions(userId: string): Promise<JsonValue> {
+    const response = await optional(
+      this.client.request<JsonValue>(`/${encodeId(userId)}/sms`),
+    );
+    return sanitize(response.value ?? { items: [] });
+  }
+
   public async getHistoryEntry(entryId: string): Promise<JsonValue> {
     return sanitize(await this.client.request<JsonValue>(`/history/${encodeId(entryId)}`) ?? {});
   }
