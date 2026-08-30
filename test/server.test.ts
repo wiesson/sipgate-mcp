@@ -16,6 +16,16 @@ function backend(): TelephonyBackend {
     listUserNumbers: async () => ({ items: [] }),
     getUserNumbers: async () => ({ items: [] }),
     listPhonelines: async () => ({ items: [] }),
+    getPhoneline: async () => ({}),
+    getPhonelineBlockAnonymous: async () => ({}),
+    listPhonelineDevices: async () => ({ items: [] }),
+    listParallelForwardings: async () => ({ items: [] }),
+    listPhonelineVoicemails: async () => ({ items: [] }),
+    listVoicemailGreetings: async () => ({ items: [] }),
+    listVoicemails: async () => ({ items: [] }),
+    getVoicemail: async () => ({}),
+    listAutorecordingGreetings: async () => ({}),
+    getAutorecordingSettings: async () => ({}),
     listDevices: async () => ({ items: [] }),
     getDevice: async () => ({}),
     getDeviceCallerId: async () => ({}),
@@ -34,10 +44,35 @@ function backend(): TelephonyBackend {
     listNotifications: async () => ({ call: [], fax: [], sms: [], voicemail: [] }),
     listFaxlines: async () => ({ items: [] }),
     listFaxlineNumbers: async () => ({ items: [] }),
+    getFaxlineCallerId: async () => ({}),
     getSettings: async () => ({ users: [] }),
     setNumberRouting: mutation,
     setUserNumberRouting: mutation,
     setForwarding: mutation,
+    createPhoneline: mutation,
+    updatePhonelineAlias: mutation,
+    deletePhoneline: mutation,
+    setPhonelineBlockAnonymous: mutation,
+    attachDeviceToPhoneline: mutation,
+    detachDeviceFromPhoneline: mutation,
+    createParallelForwarding: mutation,
+    updateParallelForwarding: mutation,
+    deleteParallelForwarding: mutation,
+    updateVoicemail: mutation,
+    createVoicemailGreeting: mutation,
+    updateVoicemailGreeting: mutation,
+    deleteVoicemailGreeting: mutation,
+    setVoicemailTranscription: mutation,
+    playVoicemail: mutation,
+    recordVoicemailGreeting: mutation,
+    createAutorecordingGreeting: mutation,
+    deleteAutorecordingGreeting: mutation,
+    setAutorecordingSettings: mutation,
+    createFaxline: mutation,
+    updateFaxlineAlias: mutation,
+    deleteFaxline: mutation,
+    setFaxlineCallerId: mutation,
+    setFaxlineTagline: mutation,
     setDnd: mutation,
     updateDevice: mutation,
     deleteDevice: mutation,
@@ -89,7 +124,7 @@ test("MCP server lists JSON-schema tools and executes a tool over the SDK transp
 
   try {
     const listed = await client.listTools();
-    assert.equal(listed.tools.length, 62);
+    assert.equal(listed.tools.length, 97);
     assert.equal(listed.tools.find((tool) => tool.name === "call_history")?.inputSchema.type, "object");
     assert.equal(client.getServerVersion()?.version, "0.5.0");
     assert.match(client.getInstructions() ?? "", /authenticated user's resources/);
@@ -114,7 +149,7 @@ test("MCP server advertises administrator account scope and read-only mode", asy
     assert.match(client.getInstructions() ?? "", /account scope/);
     assert.match(client.getInstructions() ?? "", /administrator/);
     assert.match(client.getInstructions() ?? "", /read-only/);
-    assert.equal((await client.listTools()).tools.length, 22);
+    assert.equal((await client.listTools()).tools.length, 33);
   } finally {
     await client.close();
     await server.close();

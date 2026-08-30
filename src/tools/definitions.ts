@@ -295,6 +295,113 @@ export function createToolDefinitions(
         backend.listFaxlineNumbers(user_id, faxline_id),
     }),
     define({
+      name: "get_phoneline",
+      description: "Get one owned phoneline. Accounts without a phoneline layer return a clean unavailable result.",
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id.describe("Phoneline ID returned by get_routing or get_settings"),
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_id, phoneline_id }) => backend.getPhoneline(user_id, phoneline_id),
+    }),
+    define({
+      name: "get_phoneline_block_anonymous",
+      description: "Get anonymous-caller blocking for one owned phoneline, or report that phonelines are unavailable.",
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_id, phoneline_id }) =>
+        backend.getPhonelineBlockAnonymous(user_id, phoneline_id),
+    }),
+    define({
+      name: "list_phoneline_devices",
+      description: "List owned devices attached to one owned phoneline, or report that phonelines are unavailable.",
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_id, phoneline_id }) =>
+        backend.listPhonelineDevices(user_id, phoneline_id),
+    }),
+    define({
+      name: "list_parallel_forwardings",
+      description: "List parallel forwardings of one owned phoneline, or report that the feature is unavailable.",
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_id, phoneline_id }) =>
+        backend.listParallelForwardings(user_id, phoneline_id),
+    }),
+    define({
+      name: "list_phoneline_voicemails",
+      description: "List voicemail extensions belonging to one owned phoneline, or report that the feature is unavailable.",
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_id, phoneline_id }) =>
+        backend.listPhonelineVoicemails(user_id, phoneline_id),
+    }),
+    define({
+      name: "list_voicemail_greetings",
+      description: "List greetings belonging to an owned voicemail on an owned phoneline.",
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+        voicemail_id: id,
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_id, phoneline_id, voicemail_id }) =>
+        backend.listVoicemailGreetings(user_id, phoneline_id, voicemail_id),
+    }),
+    define({
+      name: "list_voicemails",
+      description: userScoped
+        ? "List only voicemail extensions that belong to the authenticated user's phonelines."
+        : "List all voicemail extensions in the sipgate account.",
+      schema: z.object({}),
+      annotations: readAnnotations,
+      execute: async () => backend.listVoicemails(),
+    }),
+    define({
+      name: "get_voicemail",
+      description: "Get one voicemail extension after verifying that it belongs to an owned phoneline.",
+      schema: z.object({ voicemail_id: id }),
+      annotations: readAnnotations,
+      execute: async ({ voicemail_id }) => backend.getVoicemail(voicemail_id),
+    }),
+    define({
+      name: "list_autorecording_greetings",
+      description: "Get the current automated call-recording announcement. Call recording may incur charges; the caller is responsible for obtaining every participant's consent.",
+      schema: z.object({}),
+      annotations: readAnnotations,
+      execute: async () => backend.listAutorecordingGreetings(),
+    }),
+    define({
+      name: "get_autorecording_settings",
+      description: "Get automated call-recording settings for an owned phoneline or faxline extension. Call recording may incur charges; the caller is responsible for obtaining every participant's consent.",
+      schema: z.object({ extension: id.describe("Owned phoneline or faxline extension ID") }),
+      annotations: readAnnotations,
+      execute: async ({ extension }) => backend.getAutorecordingSettings(extension),
+    }),
+    define({
+      name: "get_faxline_caller_id",
+      description: "Get the caller ID configured for one owned faxline.",
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        faxline_id: id.describe("Faxline ID returned by list_faxlines"),
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_id, faxline_id }) =>
+        backend.getFaxlineCallerId(user_id, faxline_id),
+    }),
+    define({
       name: "get_settings",
       description: userScoped
         ? "Return the authenticated user's reachability settings, device availability/DND state, and phoneline voicemail activation and timeout settings."
@@ -339,6 +446,332 @@ export function createToolDefinitions(
       annotations: writeAnnotations,
       execute: async ({ user_id, phoneline_id, forwardings }) =>
         backend.setForwarding(user_id, phoneline_id, forwardings),
+    }),
+    define({
+      name: "create_phoneline",
+      description: `${changeWarning} create a phoneline for the authenticated user. Provisioning may affect billing; returns before: null and the initial state, or a clean unavailable result.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id }) => backend.createPhoneline(user_id),
+    }),
+    define({
+      name: "update_phoneline_alias",
+      description: `${changeWarning} update an owned phoneline alias. Returns before/after state or a clean unavailable result.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+        alias: swaggerString.optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ user_id, phoneline_id, alias }) =>
+        backend.updatePhonelineAlias(user_id, phoneline_id, alias),
+    }),
+    define({
+      name: "delete_phoneline",
+      description: `${changeWarning} permanently delete an owned phoneline. Returns its previous state and a deletion marker, or a clean unavailable result.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ user_id, phoneline_id }) => backend.deletePhoneline(user_id, phoneline_id),
+    }),
+    define({
+      name: "set_phoneline_block_anonymous",
+      description: `${changeWarning} configure anonymous-caller rejection or voicemail routing on an owned phoneline. Returns before/after state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+        enabled: z.boolean().optional(),
+        target: z.enum(["REJECT", "VOICEMAIL"]).optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ user_id, phoneline_id, enabled, target }) =>
+        backend.setPhonelineBlockAnonymous(user_id, phoneline_id, {
+          ...(enabled === undefined ? {} : { enabled }),
+          ...(target === undefined ? {} : { target }),
+        }),
+    }),
+    define({
+      name: "attach_device_to_phoneline",
+      description: `${changeWarning} attach an owned device to an owned phoneline. Returns the complete before/after device assignment.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+        device_id: id.describe("Owned device ID returned by list_devices"),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, phoneline_id, device_id }) =>
+        backend.attachDeviceToPhoneline(user_id, phoneline_id, device_id),
+    }),
+    define({
+      name: "detach_device_from_phoneline",
+      description: `${changeWarning} detach an owned device from an owned phoneline. Returns the complete before/after device assignment.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+        device_id: id.describe("Owned device ID returned by list_phoneline_devices"),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ user_id, phoneline_id, device_id }) =>
+        backend.detachDeviceFromPhoneline(user_id, phoneline_id, device_id),
+    }),
+    define({
+      name: "create_parallel_forwarding",
+      description: `${changeWarning} create a parallel forwarding on an owned phoneline. Returns the complete before/after forwarding list.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+        active: z.boolean().optional(),
+        alias: swaggerString.optional(),
+        destination: swaggerString.optional(),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, phoneline_id, active, alias, destination }) =>
+        backend.createParallelForwarding(user_id, phoneline_id, {
+          ...(active === undefined ? {} : { active }),
+          ...(alias === undefined ? {} : { alias }),
+          ...(destination === undefined ? {} : { destination }),
+        }),
+    }),
+    define({
+      name: "update_parallel_forwarding",
+      description: `${changeWarning} update a parallel forwarding belonging to an owned phoneline. Returns the complete before/after forwarding list.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+        parallel_forwarding_id: id,
+        active: z.boolean().optional(),
+        alias: swaggerString.optional(),
+        destination: swaggerString.optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({
+        user_id,
+        phoneline_id,
+        parallel_forwarding_id,
+        active,
+        alias,
+        destination,
+      }) => backend.updateParallelForwarding(
+        user_id,
+        phoneline_id,
+        parallel_forwarding_id,
+        {
+          ...(active === undefined ? {} : { active }),
+          ...(alias === undefined ? {} : { alias }),
+          ...(destination === undefined ? {} : { destination }),
+        },
+      ),
+    }),
+    define({
+      name: "delete_parallel_forwarding",
+      description: `${changeWarning} delete a parallel forwarding belonging to an owned phoneline. Returns the complete before/after forwarding list.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+        parallel_forwarding_id: id,
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ user_id, phoneline_id, parallel_forwarding_id }) =>
+        backend.deleteParallelForwarding(user_id, phoneline_id, parallel_forwarding_id),
+    }),
+    define({
+      name: "update_voicemail",
+      description: `${changeWarning} update an owned phoneline voicemail's active, timeout, and transcription settings. Returns before/after voicemail lists.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+        voicemail_id: id,
+        active: z.boolean(),
+        transcription: z.boolean(),
+        timeout: z.int().min(0).max(2_147_483_647).optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ user_id, phoneline_id, voicemail_id, active, transcription, timeout }) =>
+        backend.updateVoicemail(user_id, phoneline_id, voicemail_id, {
+          active,
+          transcription,
+          ...(timeout === undefined ? {} : { timeout }),
+        }),
+    }),
+    define({
+      name: "create_voicemail_greeting",
+      description: `${changeWarning} upload a greeting for an owned phoneline voicemail. Returns the complete before/after greeting list.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+        voicemail_id: id,
+        base64_content: z.string().max(15_000_000).optional(),
+        filename: swaggerString.optional(),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id, phoneline_id, voicemail_id, base64_content, filename }) =>
+        backend.createVoicemailGreeting(user_id, phoneline_id, voicemail_id, {
+          ...(base64_content === undefined ? {} : { base64Content: base64_content }),
+          ...(filename === undefined ? {} : { filename }),
+        }),
+    }),
+    define({
+      name: "update_voicemail_greeting",
+      description: `${changeWarning} activate or deactivate a greeting belonging to an owned phoneline voicemail. Returns the complete before/after greeting list.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+        voicemail_id: id,
+        greeting_id: id,
+        active: z.boolean().optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ user_id, phoneline_id, voicemail_id, greeting_id, active }) =>
+        backend.updateVoicemailGreeting(
+          user_id,
+          phoneline_id,
+          voicemail_id,
+          greeting_id,
+          active,
+        ),
+    }),
+    define({
+      name: "delete_voicemail_greeting",
+      description: `${changeWarning} delete a greeting belonging to an owned phoneline voicemail. Returns the complete before/after greeting list.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+        voicemail_id: id,
+        greeting_id: id,
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ user_id, phoneline_id, voicemail_id, greeting_id }) =>
+        backend.deleteVoicemailGreeting(user_id, phoneline_id, voicemail_id, greeting_id),
+    }),
+    define({
+      name: "set_voicemail_transcription",
+      description: `${changeWarning} enable or disable transcription for an owned phoneline voicemail. Transcription availability and pricing depend on the account. Returns before/after voicemail lists.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        phoneline_id: id,
+        voicemail_id: id,
+        active: z.boolean().optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ user_id, phoneline_id, voicemail_id, active }) =>
+        backend.setVoicemailTranscription(user_id, phoneline_id, voicemail_id, active),
+    }),
+    define({
+      name: "play_voicemail",
+      description: `${changeWarning} initiate a call to play an owned voicemail recording on an owned device. THE CALL MAY INCUR CHARGES. The caller is responsible for any consent required for recording playback. before is null because sipgate exposes no synchronous session read-back.`,
+      schema: z.object({
+        data_id: id.optional().describe("Voicemail data/history ID; required in user scope for ownership"),
+        device_id: id.optional().describe("Playback device ID; required in user scope for ownership"),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ data_id, device_id }) => backend.playVoicemail({
+        ...(data_id === undefined ? {} : { dataId: data_id }),
+        ...(device_id === undefined ? {} : { deviceId: device_id }),
+      }),
+    }),
+    define({
+      name: "record_voicemail_greeting",
+      description: `${changeWarning} initiate a call on an owned device to record a greeting for an owned voicemail. THE CALL MAY INCUR CHARGES. The caller is responsible for consent where recording law requires it. before is null because sipgate exposes no synchronous session read-back.`,
+      schema: z.object({
+        device_id: id.optional().describe("Recording device ID; required in user scope for ownership"),
+        endpoint: swaggerString.optional(),
+        target_id: id.optional().describe("Target voicemail ID; required in user scope for ownership"),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ device_id, endpoint, target_id }) => backend.recordVoicemailGreeting({
+        ...(device_id === undefined ? {} : { deviceId: device_id }),
+        ...(endpoint === undefined ? {} : { endpoint }),
+        ...(target_id === undefined ? {} : { targetId: target_id }),
+      }),
+    }),
+    define({
+      name: "create_autorecording_greeting",
+      description: `${changeWarning} replace the automated call-recording announcement. Call recording may incur charges; the caller is responsible for obtaining every participant's consent. Returns before/after greeting state.`,
+      schema: z.object({
+        base64_content: z.string().max(15_000_000).optional(),
+        filename: swaggerString.optional(),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ base64_content, filename }) => backend.createAutorecordingGreeting({
+        ...(base64_content === undefined ? {} : { base64Content: base64_content }),
+        ...(filename === undefined ? {} : { filename }),
+      }),
+    }),
+    define({
+      name: "delete_autorecording_greeting",
+      description: `${changeWarning} delete the current automated call-recording announcement after verifying its ID. Call recording may incur charges; the caller is responsible for obtaining every participant's consent. Returns previous state and a deletion marker.`,
+      schema: z.object({ greeting_id: id }),
+      annotations: writeAnnotations,
+      execute: async ({ greeting_id }) => backend.deleteAutorecordingGreeting(greeting_id),
+    }),
+    define({
+      name: "set_autorecording_settings",
+      description: `${changeWarning} enable or disable automated call recording for an owned phoneline or faxline extension. Recording may incur charges; the caller is responsible for obtaining every participant's consent. Returns before/after state.`,
+      schema: z.object({
+        extension: id.describe("Owned phoneline or faxline extension ID"),
+        active: z.boolean().optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ extension, active }) => backend.setAutorecordingSettings(extension, active),
+    }),
+    define({
+      name: "create_faxline",
+      description: `${changeWarning} create a faxline for the authenticated user. Provisioning may affect billing; returns before: null and the initial state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+      }),
+      annotations: actionAnnotations,
+      execute: async ({ user_id }) => backend.createFaxline(user_id),
+    }),
+    define({
+      name: "update_faxline_alias",
+      description: `${changeWarning} update the alias of an owned faxline. Returns before/after faxline state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        faxline_id: id,
+        alias: swaggerString.optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ user_id, faxline_id, alias }) =>
+        backend.updateFaxlineAlias(user_id, faxline_id, alias),
+    }),
+    define({
+      name: "delete_faxline",
+      description: `${changeWarning} permanently delete an owned faxline. Returns its previous state and a deletion marker.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        faxline_id: id,
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ user_id, faxline_id }) => backend.deleteFaxline(user_id, faxline_id),
+    }),
+    define({
+      name: "set_faxline_caller_id",
+      description: `${changeWarning} set an owned faxline's caller ID to an owned phone number. Returns before/after caller-ID state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        faxline_id: id,
+        value: swaggerString.optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ user_id, faxline_id, value }) =>
+        backend.setFaxlineCallerId(user_id, faxline_id, value),
+    }),
+    define({
+      name: "set_faxline_tagline",
+      description: `${changeWarning} update the tagline of an owned faxline. Returns before/after faxline state.`,
+      schema: z.object({
+        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        faxline_id: id,
+        value: swaggerString.optional(),
+      }),
+      annotations: writeAnnotations,
+      execute: async ({ user_id, faxline_id, value }) =>
+        backend.setFaxlineTagline(user_id, faxline_id, value),
     }),
     define({
       name: "set_dnd",

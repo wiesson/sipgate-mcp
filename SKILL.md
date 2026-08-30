@@ -37,13 +37,16 @@ Run only one install command. Confirm that `sipgate-mcp --version` reports
   account-wide administrator access without an explicit user request.
 - User scope remains the resource boundary for write tools: device IDs,
   phone-number IDs, emergency-address IDs, notification IDs, live-call
-  participants, and faxline IDs are checked against the authenticated user's
-  ownership before account changes are sent.
+  participants, phonelines, nested parallel forwardings, voicemails and
+  greetings, attached devices, faxlines, and automated-recording extensions
+  are checked against the authenticated user's ownership before account
+  changes are sent.
 - Never display device credentials. Password rotation deliberately redacts the
   one-time password returned by sipgate.
-- Fax send/resend actions incur charges. Call recording may incur charges and
-  is legally sensitive; in Germany the caller is responsible for obtaining
-  every participant's consent, even when the recording announcement is off.
+- Fax send/resend and call-initiating voicemail playback/recording actions may
+  incur charges. Call and automated recording are legally sensitive; in
+  Germany the caller is responsible for obtaining every participant's consent,
+  even when the recording announcement is off.
 - Do not remove or replace an existing MCP configuration without the user's
   approval.
 
@@ -69,12 +72,15 @@ be enabled; do not answer that choice on the user's behalf. The client starts
 and stops that process, so do not launch `sipgate-mcp` as a daemon.
 
 Version 0.5.0 adds user-scoped device, quick-dial, user-number, emergency-
-address, notification, live-call-control, and fax self-service. It supports
-accounts without phonelines: direct number reads use `/{userId}/numbers`, while
-ownership checks retain the device-based number fallback. Active calls are
-filtered by participants matching owned devices or numbers; notifications and
-faxlines are verified against the authenticated user. Device creation, fax
-transmission, recording, and other writes may incur charges or carry legal
+address, notification, live-call-control, phoneline, voicemail/greeting,
+automated-recording, and fax self-service. It supports accounts without
+phonelines: direct number reads use `/{userId}/numbers`, ownership checks retain
+the device-based number fallback, and phoneline-only tools return an explicit
+unavailable result instead of surfacing sipgate's 403. Active calls are
+filtered by participants matching owned devices or numbers; nested voicemail,
+greeting, forwarding, attached-device, faxline, and recording-extension IDs
+are verified before use. Device/faxline/phoneline creation, fax transmission,
+call sessions, recording, and other writes may incur charges or carry legal
 consequences, and address changes can deactivate associated numbers depending
 on country.
 

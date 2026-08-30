@@ -2,6 +2,7 @@ import { SipgateApiError, SipgateClient } from "./sipgate-client.js";
 import type {
   AddressUpdateInput,
   AuthenticatedUserContext,
+  BlockAnonymousInput,
   CallEmailNotificationInput,
   CallSmsNotificationInput,
   CallTransferInput,
@@ -11,18 +12,23 @@ import type {
   FaxReportNotificationInput,
   FaxSmsNotificationInput,
   ForwardingRule,
+  GreetingUploadInput,
   HistoryQuery,
   JsonObject,
   JsonValue,
   LocalPrefixInput,
   MutationResult,
   PaginationInput,
+  ParallelForwardingInput,
   QuickDialInput,
   ResendFaxInput,
   SendFaxInput,
   SmsEmailNotificationInput,
   TelephonyBackend,
   VoicemailEmailNotificationInput,
+  VoicemailPlaybackInput,
+  VoicemailRecordingInput,
+  VoicemailSettingsInput,
   VoicemailSmsNotificationInput,
 } from "./telephony-backend.js";
 
@@ -67,6 +73,25 @@ function stringField(value: JsonObject, key: string): string | undefined {
 
 function encodeId(id: string): string {
   return encodeURIComponent(id);
+}
+
+function phonelineUnavailable(items = false): JsonObject {
+  return {
+    ...(items ? { items: [] } : {}),
+    phonelinesAvailable: false,
+    note: "This sipgate account does not provide the phoneline feature.",
+  };
+}
+
+function phonelineMutationUnavailable(): MutationResult {
+  return {
+    before: null,
+    after: {
+      changed: false,
+      phonelinesAvailable: false,
+      note: "This sipgate account does not provide the phoneline feature; no change was attempted.",
+    },
+  };
 }
 
 /**
@@ -151,6 +176,95 @@ export class SipgateBackend implements TelephonyBackend {
 
   private tryListPhonelines(userId: string): Promise<OptionalResult<JsonValue>> {
     return optional(this.client.request<JsonValue>(`/${encodeId(userId)}/phonelines`));
+  }
+
+  private phonelinePath(userId: string, phonelineId: string, suffix = ""): string {
+    return `/${encodeId(userId)}/phonelines/${encodeId(phonelineId)}${suffix}`;
+  }
+
+  private async optionalPhonelineRead(path: string, list = false): Promise<JsonValue> {
+    const { value, available } = await optional(this.client.request<JsonValue>(path));
+    return available ? sanitize(value ?? (list ? { items: [] } : {})) : phonelineUnavailable(list);
+  }
+
+  public getPhoneline(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.optionalPhonelineRead(this.phonelinePath(userId, phonelineId));
+  }
+
+  public getPhonelineBlockAnonymous(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.optionalPhonelineRead(
+      this.phonelinePath(userId, phonelineId, "/blockanonymous"),
+    );
+  }
+
+  public listPhonelineDevices(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.optionalPhonelineRead(
+      this.phonelinePath(userId, phonelineId, "/devices"),
+      true,
+    );
+  }
+
+  public listParallelForwardings(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.optionalPhonelineRead(
+      this.phonelinePath(userId, phonelineId, "/parallelforwardings"),
+      true,
+    );
+  }
+
+  public listPhonelineVoicemails(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.optionalPhonelineRead(
+      this.phonelinePath(userId, phonelineId, "/voicemails"),
+      true,
+    );
+  }
+
+  public listVoicemailGreetings(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+  ): Promise<JsonValue> {
+    return this.optionalPhonelineRead(
+      this.phonelinePath(
+        userId,
+        phonelineId,
+        `/voicemails/${encodeId(voicemailId)}/greetings`,
+      ),
+      true,
+    );
+  }
+
+  public async listVoicemails(): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>("/voicemails");
+    return sanitize(response ?? { items: [] });
+  }
+
+  public async getVoicemail(voicemailId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(`/voicemails/${encodeId(voicemailId)}`);
+    return sanitize(response ?? {});
+  }
+
+  public async listAutorecordingGreetings(): Promise<JsonValue> {
+    const { value, available } = await optional(
+      this.client.request<JsonValue>("/autorecordings/greetings"),
+    );
+    return available
+      ? sanitize(value ?? {})
+      : {
+        autorecordingsAvailable: false,
+        note: "Automated call recording is not activated for this sipgate account.",
+      };
+  }
+
+  public async getAutorecordingSettings(extension: string): Promise<JsonValue> {
+    const { value, available } = await optional(this.client.request<JsonValue>(
+      `/autorecordings/${encodeId(extension)}/settings`,
+    ));
+    return available
+      ? sanitize(value ?? {})
+      : {
+        autorecordingsAvailable: false,
+        note: "Automated call recording is not activated for this extension.",
+      };
   }
 
   private async listDeviceIds(userId: string): Promise<Set<string>> {
@@ -423,6 +537,13 @@ export class SipgateBackend implements TelephonyBackend {
     return sanitize(response ?? { items: [] });
   }
 
+  public async getFaxlineCallerId(userId: string, faxlineId: string): Promise<JsonValue> {
+    const response = await this.client.request<JsonValue>(
+      `/${encodeId(userId)}/faxlines/${encodeId(faxlineId)}/callerid`,
+    );
+    return sanitize(response ?? {});
+  }
+
   public async getSettings(userId?: string): Promise<JsonValue> {
     const users = userId
       ? [await this.getUser(userId)]
@@ -493,6 +614,385 @@ export class SipgateBackend implements TelephonyBackend {
     });
     const after = await this.client.request<JsonValue>(path);
     return { before: sanitize(before ?? { items: [] }), after: sanitize(after ?? { items: [] }) };
+  }
+
+  public async createPhoneline(userId: string): Promise<MutationResult> {
+    const { value, available } = await optional(this.client.request<JsonValue>(
+      `/${encodeId(userId)}/phonelines`,
+      { method: "POST" },
+    ));
+    if (!available) return phonelineMutationUnavailable();
+    return {
+      before: null,
+      after: sanitize({
+        phoneline: value ?? {},
+        created: true,
+        note: "No phoneline existed before this create operation; the returned phoneline is the initial state.",
+      }),
+    };
+  }
+
+  public updatePhonelineAlias(
+    userId: string,
+    phonelineId: string,
+    alias?: string,
+  ): Promise<MutationResult> {
+    const path = this.phonelinePath(userId, phonelineId);
+    return this.mutateOptionalPhonelineWithReadback(
+      path,
+      path,
+      "PUT",
+      { ...(alias === undefined ? {} : { alias }) },
+    );
+  }
+
+  public async deletePhoneline(userId: string, phonelineId: string): Promise<MutationResult> {
+    const path = this.phonelinePath(userId, phonelineId);
+    const { value: before, available } = await optional(this.client.request<JsonValue>(path));
+    if (!available) return phonelineMutationUnavailable();
+    const response = await this.client.request<JsonValue>(path, { method: "DELETE" });
+    return {
+      before: sanitize(before ?? {}),
+      after: sanitize({
+        deleted: true,
+        response: response ?? null,
+        note: "sipgate does not provide a deleted-phoneline read-back endpoint.",
+      }),
+    };
+  }
+
+  public setPhonelineBlockAnonymous(
+    userId: string,
+    phonelineId: string,
+    input: BlockAnonymousInput,
+  ): Promise<MutationResult> {
+    const path = this.phonelinePath(userId, phonelineId, "/blockanonymous");
+    return this.mutateOptionalPhonelineWithReadback(path, path, "PUT", {
+      ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+      ...(input.target === undefined ? {} : { target: input.target }),
+    });
+  }
+
+  public attachDeviceToPhoneline(
+    userId: string,
+    phonelineId: string,
+    deviceId: string,
+  ): Promise<MutationResult> {
+    const path = this.phonelinePath(userId, phonelineId, "/devices");
+    return this.mutateOptionalPhonelineWithReadback(
+      path,
+      path,
+      "POST",
+      { deviceId },
+      true,
+    );
+  }
+
+  public detachDeviceFromPhoneline(
+    userId: string,
+    phonelineId: string,
+    deviceId: string,
+  ): Promise<MutationResult> {
+    const readPath = this.phonelinePath(userId, phonelineId, "/devices");
+    return this.mutateOptionalPhonelineWithReadback(
+      readPath,
+      `${readPath}/${encodeId(deviceId)}`,
+      "DELETE",
+      undefined,
+      true,
+    );
+  }
+
+  public createParallelForwarding(
+    userId: string,
+    phonelineId: string,
+    input: ParallelForwardingInput,
+  ): Promise<MutationResult> {
+    const path = this.phonelinePath(userId, phonelineId, "/parallelforwardings");
+    return this.mutateOptionalPhonelineWithReadback(
+      path,
+      path,
+      "POST",
+      this.parallelForwardingBody(input),
+      true,
+    );
+  }
+
+  public updateParallelForwarding(
+    userId: string,
+    phonelineId: string,
+    parallelForwardingId: string,
+    input: ParallelForwardingInput,
+  ): Promise<MutationResult> {
+    const readPath = this.phonelinePath(userId, phonelineId, "/parallelforwardings");
+    return this.mutateOptionalPhonelineWithReadback(
+      readPath,
+      `${readPath}/${encodeId(parallelForwardingId)}`,
+      "PUT",
+      this.parallelForwardingBody(input),
+      true,
+    );
+  }
+
+  public deleteParallelForwarding(
+    userId: string,
+    phonelineId: string,
+    parallelForwardingId: string,
+  ): Promise<MutationResult> {
+    const readPath = this.phonelinePath(userId, phonelineId, "/parallelforwardings");
+    return this.mutateOptionalPhonelineWithReadback(
+      readPath,
+      `${readPath}/${encodeId(parallelForwardingId)}`,
+      "DELETE",
+      undefined,
+      true,
+    );
+  }
+
+  public updateVoicemail(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    input: VoicemailSettingsInput,
+  ): Promise<MutationResult> {
+    const readPath = this.phonelinePath(userId, phonelineId, "/voicemails");
+    return this.mutateOptionalPhonelineWithReadback(
+      readPath,
+      `${readPath}/${encodeId(voicemailId)}`,
+      "PUT",
+      {
+        active: input.active,
+        transcription: input.transcription,
+        ...(input.timeout === undefined ? {} : { timeout: input.timeout }),
+      },
+      true,
+    );
+  }
+
+  public createVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    input: GreetingUploadInput,
+  ): Promise<MutationResult> {
+    const path = this.phonelinePath(
+      userId,
+      phonelineId,
+      `/voicemails/${encodeId(voicemailId)}/greetings`,
+    );
+    return this.mutateOptionalPhonelineWithReadback(
+      path,
+      path,
+      "POST",
+      this.greetingBody(input),
+      true,
+    );
+  }
+
+  public updateVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    greetingId: string,
+    active?: boolean,
+  ): Promise<MutationResult> {
+    const readPath = this.phonelinePath(
+      userId,
+      phonelineId,
+      `/voicemails/${encodeId(voicemailId)}/greetings`,
+    );
+    return this.mutateOptionalPhonelineWithReadback(
+      readPath,
+      `${readPath}/${encodeId(greetingId)}`,
+      "PUT",
+      { ...(active === undefined ? {} : { active }) },
+      true,
+    );
+  }
+
+  public deleteVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    greetingId: string,
+  ): Promise<MutationResult> {
+    const readPath = this.phonelinePath(
+      userId,
+      phonelineId,
+      `/voicemails/${encodeId(voicemailId)}/greetings`,
+    );
+    return this.mutateOptionalPhonelineWithReadback(
+      readPath,
+      `${readPath}/${encodeId(greetingId)}`,
+      "DELETE",
+      undefined,
+      true,
+    );
+  }
+
+  public setVoicemailTranscription(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    active?: boolean,
+  ): Promise<MutationResult> {
+    const readPath = this.phonelinePath(userId, phonelineId, "/voicemails");
+    return this.mutateOptionalPhonelineWithReadback(
+      readPath,
+      `${readPath}/${encodeId(voicemailId)}/transcriptions`,
+      "PUT",
+      { ...(active === undefined ? {} : { active }) },
+      true,
+    );
+  }
+
+  public async playVoicemail(input: VoicemailPlaybackInput): Promise<MutationResult> {
+    const response = await this.client.request<JsonValue>("/sessions/voicemail/play", {
+      method: "POST",
+      body: {
+        ...(input.dataId === undefined ? {} : { datadId: input.dataId }),
+        ...(input.deviceId === undefined ? {} : { deviceId: input.deviceId }),
+      },
+    });
+    return this.sessionMutationResult(response, "voicemail playback");
+  }
+
+  public async recordVoicemailGreeting(
+    input: VoicemailRecordingInput,
+  ): Promise<MutationResult> {
+    const response = await this.client.request<JsonValue>("/sessions/voicemail/recording", {
+      method: "POST",
+      body: {
+        ...(input.deviceId === undefined ? {} : { deviceId: input.deviceId }),
+        ...(input.endpoint === undefined ? {} : { endpoint: input.endpoint }),
+        ...(input.targetId === undefined ? {} : { targetId: input.targetId }),
+      },
+    });
+    return this.sessionMutationResult(response, "voicemail-greeting recording");
+  }
+
+  public async createAutorecordingGreeting(
+    input: GreetingUploadInput,
+  ): Promise<MutationResult> {
+    const before = await optional(this.client.request<JsonValue>("/autorecordings/greetings"));
+    if (!before.available) return this.autorecordingUnavailableMutation();
+    await this.client.request<JsonValue>("/autorecordings/greetings", {
+      method: "POST",
+      body: this.greetingBody(input),
+    });
+    const after = await optional(this.client.request<JsonValue>("/autorecordings/greetings"));
+    return {
+      before: sanitize(before.value ?? {}),
+      after: after.available
+        ? sanitize(after.value ?? {})
+        : {
+          autorecordingsAvailable: false,
+          note: "The greeting was accepted, but automated call recording was unavailable during read-back.",
+        },
+    };
+  }
+
+  public async deleteAutorecordingGreeting(greetingId: string): Promise<MutationResult> {
+    const before = await optional(this.client.request<JsonValue>("/autorecordings/greetings"));
+    if (!before.available) return this.autorecordingUnavailableMutation();
+    const response = await this.client.request<JsonValue>(
+      `/autorecordings/greetings/${encodeId(greetingId)}`,
+      { method: "DELETE" },
+    );
+    return {
+      before: sanitize(before.value ?? {}),
+      after: sanitize({
+        deleted: true,
+        response: response ?? null,
+        note: "sipgate exposes no separate read-back for a deleted automated-recording greeting.",
+      }),
+    };
+  }
+
+  public async setAutorecordingSettings(
+    extension: string,
+    active?: boolean,
+  ): Promise<MutationResult> {
+    const path = `/autorecordings/${encodeId(extension)}/settings`;
+    const before = await optional(this.client.request<JsonValue>(path));
+    if (!before.available) return this.autorecordingUnavailableMutation();
+    await this.client.request<JsonValue>(path, {
+      method: "PUT",
+      body: { ...(active === undefined ? {} : { active }) },
+    });
+    const after = await optional(this.client.request<JsonValue>(path));
+    return {
+      before: sanitize(before.value ?? {}),
+      after: after.available
+        ? sanitize(after.value ?? {})
+        : {
+          autorecordingsAvailable: false,
+          note: "The setting was accepted, but automated call recording was unavailable during read-back.",
+        },
+    };
+  }
+
+  public async createFaxline(userId: string): Promise<MutationResult> {
+    const response = await this.client.request<JsonValue>(`/${encodeId(userId)}/faxlines`, {
+      method: "POST",
+    });
+    return {
+      before: null,
+      after: sanitize({
+        faxline: response ?? {},
+        created: true,
+        note: "No faxline existed before this create operation; the returned faxline is the initial state.",
+      }),
+    };
+  }
+
+  public updateFaxlineAlias(
+    userId: string,
+    faxlineId: string,
+    alias?: string,
+  ): Promise<MutationResult> {
+    return this.mutateFaxlineWithReadback(userId, faxlineId, "", {
+      ...(alias === undefined ? {} : { alias }),
+    });
+  }
+
+  public async deleteFaxline(userId: string, faxlineId: string): Promise<MutationResult> {
+    const before = await this.findFaxline(userId, faxlineId);
+    const response = await this.client.request<JsonValue>(
+      `/${encodeId(userId)}/faxlines/${encodeId(faxlineId)}`,
+      { method: "DELETE" },
+    );
+    return {
+      before: sanitize(before),
+      after: sanitize({
+        deleted: true,
+        response: response ?? null,
+        note: "sipgate does not provide a deleted-faxline read-back endpoint.",
+      }),
+    };
+  }
+
+  public setFaxlineCallerId(
+    userId: string,
+    faxlineId: string,
+    value?: string,
+  ): Promise<MutationResult> {
+    const path = `/${encodeId(userId)}/faxlines/${encodeId(faxlineId)}/callerid`;
+    return this.mutateWithReadback(
+      () => this.client.request<JsonValue>(path),
+      path,
+      { ...(value === undefined ? {} : { value }) },
+    );
+  }
+
+  public setFaxlineTagline(
+    userId: string,
+    faxlineId: string,
+    value?: string,
+  ): Promise<MutationResult> {
+    return this.mutateFaxlineWithReadback(userId, faxlineId, "/tagline", {
+      ...(value === undefined ? {} : { value }),
+    });
   }
 
   public async setDnd(deviceId: string, enabled: boolean): Promise<MutationResult> {
@@ -1127,6 +1627,87 @@ export class SipgateBackend implements TelephonyBackend {
       path,
       body,
     );
+  }
+
+  private async mutateOptionalPhonelineWithReadback(
+    readPath: string,
+    writePath: string,
+    method: "POST" | "PUT" | "DELETE",
+    body?: JsonObject,
+    list = false,
+  ): Promise<MutationResult> {
+    const before = await optional(this.client.request<JsonValue>(readPath));
+    if (!before.available) return phonelineMutationUnavailable();
+    await this.client.request<JsonValue>(writePath, {
+      method,
+      ...(body === undefined ? {} : { body }),
+    });
+    const after = await optional(this.client.request<JsonValue>(readPath));
+    return {
+      before: sanitize(before.value ?? (list ? { items: [] } : {})),
+      after: after.available
+        ? sanitize(after.value ?? (list ? { items: [] } : {}))
+        : phonelineUnavailable(list),
+    };
+  }
+
+  private parallelForwardingBody(input: ParallelForwardingInput): JsonObject {
+    return {
+      ...(input.active === undefined ? {} : { active: input.active }),
+      ...(input.alias === undefined ? {} : { alias: input.alias }),
+      ...(input.destination === undefined ? {} : { destination: input.destination }),
+    };
+  }
+
+  private greetingBody(input: GreetingUploadInput): JsonObject {
+    return {
+      ...(input.base64Content === undefined ? {} : { base64Content: input.base64Content }),
+      ...(input.filename === undefined ? {} : { filename: input.filename }),
+    };
+  }
+
+  private sessionMutationResult(response: JsonValue | undefined, action: string): MutationResult {
+    return {
+      before: null,
+      after: sanitize({
+        session: response ?? null,
+        requestAccepted: true,
+        note: `sipgate exposes no synchronous ${action} read-back. The call may incur charges; the caller is responsible for consent where recording law requires it.`,
+      }),
+    };
+  }
+
+  private autorecordingUnavailableMutation(): MutationResult {
+    return {
+      before: null,
+      after: {
+        changed: false,
+        autorecordingsAvailable: false,
+        note: "Automated call recording is not activated for this sipgate account; no change was attempted.",
+      },
+    };
+  }
+
+  private async findFaxline(userId: string, faxlineId: string): Promise<JsonObject> {
+    const response = await this.listFaxlines(userId);
+    const faxline = asItems(response).find((item) => stringField(item, "id") === faxlineId);
+    if (!faxline) throw new SipgateApiError("The requested sipgate faxline was not found.", 404);
+    return faxline;
+  }
+
+  private async mutateFaxlineWithReadback(
+    userId: string,
+    faxlineId: string,
+    suffix: string,
+    body: JsonObject,
+  ): Promise<MutationResult> {
+    const before = await this.findFaxline(userId, faxlineId);
+    await this.client.request<JsonValue>(
+      `/${encodeId(userId)}/faxlines/${encodeId(faxlineId)}${suffix}`,
+      { method: "PUT", body },
+    );
+    const after = await this.findFaxline(userId, faxlineId);
+    return { before: sanitize(before), after: sanitize(after) };
   }
 
   private async createDevice(path: string, body: JsonObject): Promise<MutationResult> {

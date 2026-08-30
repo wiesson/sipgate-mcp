@@ -3,6 +3,7 @@ import test from "node:test";
 import type {
   AddressUpdateInput,
   AuthenticatedUserContext,
+  BlockAnonymousInput,
   CallEmailNotificationInput,
   CallSmsNotificationInput,
   CallTransferInput,
@@ -12,17 +13,22 @@ import type {
   FaxReportNotificationInput,
   FaxSmsNotificationInput,
   ForwardingRule,
+  GreetingUploadInput,
   HistoryQuery,
   JsonValue,
   LocalPrefixInput,
   MutationResult,
   PaginationInput,
+  ParallelForwardingInput,
   QuickDialInput,
   ResendFaxInput,
   SendFaxInput,
   SmsEmailNotificationInput,
   TelephonyBackend,
   VoicemailEmailNotificationInput,
+  VoicemailPlaybackInput,
+  VoicemailRecordingInput,
+  VoicemailSettingsInput,
   VoicemailSmsNotificationInput,
 } from "../src/backend/telephony-backend.js";
 import { createToolDefinitions } from "../src/tools/definitions.js";
@@ -52,6 +58,30 @@ class FakeBackend implements TelephonyBackend {
   }
   getUserNumbers(userId: string): Promise<JsonValue> { return this.read("getUserNumbers", userId); }
   listPhonelines(userId: string): Promise<JsonValue> { return this.read("listPhonelines", userId); }
+  getPhoneline(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.read("getPhoneline", userId, phonelineId);
+  }
+  getPhonelineBlockAnonymous(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.read("getPhonelineBlockAnonymous", userId, phonelineId);
+  }
+  listPhonelineDevices(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.read("listPhonelineDevices", userId, phonelineId);
+  }
+  listParallelForwardings(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.read("listParallelForwardings", userId, phonelineId);
+  }
+  listPhonelineVoicemails(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.read("listPhonelineVoicemails", userId, phonelineId);
+  }
+  listVoicemailGreetings(userId: string, phonelineId: string, voicemailId: string): Promise<JsonValue> {
+    return this.read("listVoicemailGreetings", userId, phonelineId, voicemailId);
+  }
+  listVoicemails(): Promise<JsonValue> { return this.read("listVoicemails"); }
+  getVoicemail(voicemailId: string): Promise<JsonValue> { return this.read("getVoicemail", voicemailId); }
+  listAutorecordingGreetings(): Promise<JsonValue> { return this.read("listAutorecordingGreetings"); }
+  getAutorecordingSettings(extension: string): Promise<JsonValue> {
+    return this.read("getAutorecordingSettings", extension);
+  }
   listDevices(userId?: string, types?: DeviceType[]): Promise<JsonValue> {
     return this.read("listDevices", userId, types);
   }
@@ -86,6 +116,9 @@ class FakeBackend implements TelephonyBackend {
   listFaxlineNumbers(userId: string, faxlineId: string): Promise<JsonValue> {
     return this.read("listFaxlineNumbers", userId, faxlineId);
   }
+  getFaxlineCallerId(userId: string, faxlineId: string): Promise<JsonValue> {
+    return this.read("getFaxlineCallerId", userId, faxlineId);
+  }
   getSettings(userId?: string): Promise<JsonValue> { return this.read("getSettings", userId); }
   setNumberRouting(numberId: string, endpointId: string): Promise<MutationResult> {
     return this.write("setNumberRouting", numberId, endpointId);
@@ -95,6 +128,111 @@ class FakeBackend implements TelephonyBackend {
   }
   setForwarding(userId: string, phonelineId: string, forwardings: ForwardingRule[]): Promise<MutationResult> {
     return this.write("setForwarding", userId, phonelineId, forwardings);
+  }
+  createPhoneline(userId: string): Promise<MutationResult> {
+    return this.write("createPhoneline", userId);
+  }
+  updatePhonelineAlias(userId: string, phonelineId: string, alias?: string): Promise<MutationResult> {
+    return this.write("updatePhonelineAlias", userId, phonelineId, alias);
+  }
+  deletePhoneline(userId: string, phonelineId: string): Promise<MutationResult> {
+    return this.write("deletePhoneline", userId, phonelineId);
+  }
+  setPhonelineBlockAnonymous(userId: string, phonelineId: string, input: BlockAnonymousInput): Promise<MutationResult> {
+    return this.write("setPhonelineBlockAnonymous", userId, phonelineId, input);
+  }
+  attachDeviceToPhoneline(userId: string, phonelineId: string, deviceId: string): Promise<MutationResult> {
+    return this.write("attachDeviceToPhoneline", userId, phonelineId, deviceId);
+  }
+  detachDeviceFromPhoneline(userId: string, phonelineId: string, deviceId: string): Promise<MutationResult> {
+    return this.write("detachDeviceFromPhoneline", userId, phonelineId, deviceId);
+  }
+  createParallelForwarding(userId: string, phonelineId: string, input: ParallelForwardingInput): Promise<MutationResult> {
+    return this.write("createParallelForwarding", userId, phonelineId, input);
+  }
+  updateParallelForwarding(
+    userId: string,
+    phonelineId: string,
+    parallelForwardingId: string,
+    input: ParallelForwardingInput,
+  ): Promise<MutationResult> {
+    return this.write("updateParallelForwarding", userId, phonelineId, parallelForwardingId, input);
+  }
+  deleteParallelForwarding(
+    userId: string,
+    phonelineId: string,
+    parallelForwardingId: string,
+  ): Promise<MutationResult> {
+    return this.write("deleteParallelForwarding", userId, phonelineId, parallelForwardingId);
+  }
+  updateVoicemail(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    input: VoicemailSettingsInput,
+  ): Promise<MutationResult> {
+    return this.write("updateVoicemail", userId, phonelineId, voicemailId, input);
+  }
+  createVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    input: GreetingUploadInput,
+  ): Promise<MutationResult> {
+    return this.write("createVoicemailGreeting", userId, phonelineId, voicemailId, input);
+  }
+  updateVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    greetingId: string,
+    active?: boolean,
+  ): Promise<MutationResult> {
+    return this.write("updateVoicemailGreeting", userId, phonelineId, voicemailId, greetingId, active);
+  }
+  deleteVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    greetingId: string,
+  ): Promise<MutationResult> {
+    return this.write("deleteVoicemailGreeting", userId, phonelineId, voicemailId, greetingId);
+  }
+  setVoicemailTranscription(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    active?: boolean,
+  ): Promise<MutationResult> {
+    return this.write("setVoicemailTranscription", userId, phonelineId, voicemailId, active);
+  }
+  playVoicemail(input: VoicemailPlaybackInput): Promise<MutationResult> {
+    return this.write("playVoicemail", input);
+  }
+  recordVoicemailGreeting(input: VoicemailRecordingInput): Promise<MutationResult> {
+    return this.write("recordVoicemailGreeting", input);
+  }
+  createAutorecordingGreeting(input: GreetingUploadInput): Promise<MutationResult> {
+    return this.write("createAutorecordingGreeting", input);
+  }
+  deleteAutorecordingGreeting(greetingId: string): Promise<MutationResult> {
+    return this.write("deleteAutorecordingGreeting", greetingId);
+  }
+  setAutorecordingSettings(extension: string, active?: boolean): Promise<MutationResult> {
+    return this.write("setAutorecordingSettings", extension, active);
+  }
+  createFaxline(userId: string): Promise<MutationResult> { return this.write("createFaxline", userId); }
+  updateFaxlineAlias(userId: string, faxlineId: string, alias?: string): Promise<MutationResult> {
+    return this.write("updateFaxlineAlias", userId, faxlineId, alias);
+  }
+  deleteFaxline(userId: string, faxlineId: string): Promise<MutationResult> {
+    return this.write("deleteFaxline", userId, faxlineId);
+  }
+  setFaxlineCallerId(userId: string, faxlineId: string, value?: string): Promise<MutationResult> {
+    return this.write("setFaxlineCallerId", userId, faxlineId, value);
+  }
+  setFaxlineTagline(userId: string, faxlineId: string, value?: string): Promise<MutationResult> {
+    return this.write("setFaxlineTagline", userId, faxlineId, value);
   }
   setDnd(deviceId: string, enabled: boolean): Promise<MutationResult> {
     return this.write("setDnd", deviceId, enabled);
@@ -738,6 +876,186 @@ const newToolCases: Array<{
     method: "resendFax",
     args: [{ faxId: "100018428", faxlineId: "f0" }],
   },
+  { name: "get_phoneline", input: { user_id: "w0", phoneline_id: "p0" }, method: "getPhoneline", args: ["w0", "p0"] },
+  {
+    name: "get_phoneline_block_anonymous",
+    input: { user_id: "w0", phoneline_id: "p0" },
+    method: "getPhonelineBlockAnonymous",
+    args: ["w0", "p0"],
+  },
+  {
+    name: "list_phoneline_devices",
+    input: { user_id: "w0", phoneline_id: "p0" },
+    method: "listPhonelineDevices",
+    args: ["w0", "p0"],
+  },
+  {
+    name: "list_parallel_forwardings",
+    input: { user_id: "w0", phoneline_id: "p0" },
+    method: "listParallelForwardings",
+    args: ["w0", "p0"],
+  },
+  {
+    name: "list_phoneline_voicemails",
+    input: { user_id: "w0", phoneline_id: "p0" },
+    method: "listPhonelineVoicemails",
+    args: ["w0", "p0"],
+  },
+  {
+    name: "list_voicemail_greetings",
+    input: { user_id: "w0", phoneline_id: "p0", voicemail_id: "v0" },
+    method: "listVoicemailGreetings",
+    args: ["w0", "p0", "v0"],
+  },
+  { name: "list_voicemails", input: {}, method: "listVoicemails", args: [] },
+  { name: "get_voicemail", input: { voicemail_id: "v0" }, method: "getVoicemail", args: ["v0"] },
+  { name: "list_autorecording_greetings", input: {}, method: "listAutorecordingGreetings", args: [] },
+  {
+    name: "get_autorecording_settings",
+    input: { extension: "p0" },
+    method: "getAutorecordingSettings",
+    args: ["p0"],
+  },
+  {
+    name: "get_faxline_caller_id",
+    input: { user_id: "w0", faxline_id: "f0" },
+    method: "getFaxlineCallerId",
+    args: ["w0", "f0"],
+  },
+  { name: "create_phoneline", input: { user_id: "w0" }, method: "createPhoneline", args: ["w0"] },
+  {
+    name: "update_phoneline_alias",
+    input: { user_id: "w0", phoneline_id: "p0", alias: "Office" },
+    method: "updatePhonelineAlias",
+    args: ["w0", "p0", "Office"],
+  },
+  {
+    name: "delete_phoneline",
+    input: { user_id: "w0", phoneline_id: "p0" },
+    method: "deletePhoneline",
+    args: ["w0", "p0"],
+  },
+  {
+    name: "set_phoneline_block_anonymous",
+    input: { user_id: "w0", phoneline_id: "p0", enabled: true, target: "VOICEMAIL" },
+    method: "setPhonelineBlockAnonymous",
+    args: ["w0", "p0", { enabled: true, target: "VOICEMAIL" }],
+  },
+  {
+    name: "attach_device_to_phoneline",
+    input: { user_id: "w0", phoneline_id: "p0", device_id: "e0" },
+    method: "attachDeviceToPhoneline",
+    args: ["w0", "p0", "e0"],
+  },
+  {
+    name: "detach_device_from_phoneline",
+    input: { user_id: "w0", phoneline_id: "p0", device_id: "e0" },
+    method: "detachDeviceFromPhoneline",
+    args: ["w0", "p0", "e0"],
+  },
+  {
+    name: "create_parallel_forwarding",
+    input: { user_id: "w0", phoneline_id: "p0", active: true, alias: "Mobile", destination: "+4915799912345" },
+    method: "createParallelForwarding",
+    args: ["w0", "p0", { active: true, alias: "Mobile", destination: "+4915799912345" }],
+  },
+  {
+    name: "update_parallel_forwarding",
+    input: { user_id: "w0", phoneline_id: "p0", parallel_forwarding_id: "x0", active: false },
+    method: "updateParallelForwarding",
+    args: ["w0", "p0", "x0", { active: false }],
+  },
+  {
+    name: "delete_parallel_forwarding",
+    input: { user_id: "w0", phoneline_id: "p0", parallel_forwarding_id: "x0" },
+    method: "deleteParallelForwarding",
+    args: ["w0", "p0", "x0"],
+  },
+  {
+    name: "update_voicemail",
+    input: { user_id: "w0", phoneline_id: "p0", voicemail_id: "v0", active: true, transcription: false, timeout: 20 },
+    method: "updateVoicemail",
+    args: ["w0", "p0", "v0", { active: true, transcription: false, timeout: 20 }],
+  },
+  {
+    name: "create_voicemail_greeting",
+    input: { user_id: "w0", phoneline_id: "p0", voicemail_id: "v0", filename: "greeting.mp3", base64_content: "YWJj" },
+    method: "createVoicemailGreeting",
+    args: ["w0", "p0", "v0", { base64Content: "YWJj", filename: "greeting.mp3" }],
+  },
+  {
+    name: "update_voicemail_greeting",
+    input: { user_id: "w0", phoneline_id: "p0", voicemail_id: "v0", greeting_id: "g0", active: true },
+    method: "updateVoicemailGreeting",
+    args: ["w0", "p0", "v0", "g0", true],
+  },
+  {
+    name: "delete_voicemail_greeting",
+    input: { user_id: "w0", phoneline_id: "p0", voicemail_id: "v0", greeting_id: "g0" },
+    method: "deleteVoicemailGreeting",
+    args: ["w0", "p0", "v0", "g0"],
+  },
+  {
+    name: "set_voicemail_transcription",
+    input: { user_id: "w0", phoneline_id: "p0", voicemail_id: "v0", active: true },
+    method: "setVoicemailTranscription",
+    args: ["w0", "p0", "v0", true],
+  },
+  {
+    name: "play_voicemail",
+    input: { data_id: "1000171", device_id: "e0" },
+    method: "playVoicemail",
+    args: [{ dataId: "1000171", deviceId: "e0" }],
+  },
+  {
+    name: "record_voicemail_greeting",
+    input: { device_id: "e0", endpoint: "MAIN", target_id: "v0" },
+    method: "recordVoicemailGreeting",
+    args: [{ deviceId: "e0", endpoint: "MAIN", targetId: "v0" }],
+  },
+  {
+    name: "create_autorecording_greeting",
+    input: { filename: "notice.mp3", base64_content: "YWJj" },
+    method: "createAutorecordingGreeting",
+    args: [{ base64Content: "YWJj", filename: "notice.mp3" }],
+  },
+  {
+    name: "delete_autorecording_greeting",
+    input: { greeting_id: "ag0" },
+    method: "deleteAutorecordingGreeting",
+    args: ["ag0"],
+  },
+  {
+    name: "set_autorecording_settings",
+    input: { extension: "p0", active: true },
+    method: "setAutorecordingSettings",
+    args: ["p0", true],
+  },
+  { name: "create_faxline", input: { user_id: "w0" }, method: "createFaxline", args: ["w0"] },
+  {
+    name: "update_faxline_alias",
+    input: { user_id: "w0", faxline_id: "f0", alias: "Office fax" },
+    method: "updateFaxlineAlias",
+    args: ["w0", "f0", "Office fax"],
+  },
+  {
+    name: "delete_faxline",
+    input: { user_id: "w0", faxline_id: "f0" },
+    method: "deleteFaxline",
+    args: ["w0", "f0"],
+  },
+  {
+    name: "set_faxline_caller_id",
+    input: { user_id: "w0", faxline_id: "f0", value: "+49211123456" },
+    method: "setFaxlineCallerId",
+    args: ["w0", "f0", "+49211123456"],
+  },
+  {
+    name: "set_faxline_tagline",
+    input: { user_id: "w0", faxline_id: "f0", value: "Example Ltd." },
+    method: "setFaxlineTagline",
+    args: ["w0", "f0", "Example Ltd."],
+  },
 ];
 
 for (const tool of newToolCases) {
@@ -772,6 +1090,17 @@ test("read-only mode does not register write tools", () => {
     "list_notifications",
     "list_faxlines",
     "list_faxline_numbers",
+    "get_phoneline",
+    "get_phoneline_block_anonymous",
+    "list_phoneline_devices",
+    "list_parallel_forwardings",
+    "list_phoneline_voicemails",
+    "list_voicemail_greetings",
+    "list_voicemails",
+    "get_voicemail",
+    "list_autorecording_greetings",
+    "get_autorecording_settings",
+    "get_faxline_caller_id",
     "get_settings",
   ]);
 });
@@ -790,11 +1119,23 @@ test("tool annotations and charge warnings distinguish every read and write tool
   assert.ok(recording);
   assert.match(recording.description, /Germany/);
   assert.match(recording.description, /responsible.*consent/i);
+  for (const name of [
+    "list_autorecording_greetings",
+    "get_autorecording_settings",
+    "record_voicemail_greeting",
+    "create_autorecording_greeting",
+    "delete_autorecording_greeting",
+    "set_autorecording_settings",
+  ]) {
+    const recordingTool = definitions.find((tool) => tool.name === name);
+    assert.ok(recordingTool);
+    assert.match(recordingTool.description, /responsible.*consent/i);
+  }
   for (const name of ["send_fax", "resend_fax"]) {
     const fax = definitions.find((tool) => tool.name === name);
     assert.ok(fax);
     assert.match(fax.description, /FAX INCURS CHARGES/);
   }
-  assert.equal(definitions.filter((tool) => tool.annotations.readOnlyHint).length, 22);
-  assert.equal(definitions.filter((tool) => !tool.annotations.readOnlyHint).length, 40);
+  assert.equal(definitions.filter((tool) => tool.annotations.readOnlyHint).length, 33);
+  assert.equal(definitions.filter((tool) => !tool.annotations.readOnlyHint).length, 64);
 });

@@ -1,6 +1,29 @@
 # Changelog
 
 ## 0.5.0 - 2026-08-30
+- Add 35 phoneline, voicemail/greeting, automated-recording, and faxline-
+  configuration tools covering every requested GET/POST/PUT/DELETE operation,
+  with exact v2 paths and payloads.
+- Add phoneline detail, anonymous-call blocking, attached-device, and parallel-
+  forwarding reads/writes; enforce authenticated-user, owned-phoneline,
+  owned-device, and nested-forwarding boundaries.
+- Add phoneline voicemail settings, greeting upload/activation/deletion,
+  transcription, global voicemail reads, and voicemail playback/recording call
+  sessions. Global results are filtered to voicemail IDs discovered under the
+  authenticated user's phonelines.
+- Add automated call-recording announcement and per-extension settings. User
+  scope accepts settings only for an owned phoneline or faxline extension and
+  verifies the current announcement ID before deletion.
+- Add faxline creation, alias/deletion, caller-ID reads/writes, and tagline
+  updates with owned-faxline and owned-caller-number checks.
+- Return explicit `phonelinesAvailable: false` / `changed: false` results for
+  phoneline-only tools when sipgate returns 403/404, without attempting a
+  mutation. An available but empty phoneline collection still denies access.
+- Warn that voicemail call sessions and recording features may incur charges,
+  and that callers remain responsible for legally required recording consent.
+- Expand read-only registration to 33 read tools and the full write-enabled
+  surface to 97 tools. Add one definition and backend endpoint test per new
+  tool plus foreign-resource and phoneline-less access-policy coverage.
 - Add notification listing, creation, and deletion for call email/SMS, fax
   email/SMS/report, incoming-SMS email, and voicemail email/SMS targets.
 - Expose established calls and add hangup, hold, mute, recording, transfer,
@@ -46,7 +69,7 @@
 - Return `{before, after}` for all mutations, with explicit no-read-back notes
   for creates and deletes. Redact credential containers and the one-time
   password returned by device password rotation.
-- Expand read-only mode from seven to 22 read tools; write tools are never
+- Expand read-only mode from seven to 33 read tools; write tools are never
   registered in read-only mode.
 - Bump the package, CLI, and setup skill to version 0.5.0.
 

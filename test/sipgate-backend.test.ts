@@ -310,6 +310,30 @@ test("SipgateBackend reports phonelines as unavailable instead of failing", asyn
   });
 });
 
+test("SipgateBackend reports a specific phoneline tool as unavailable on HTTP 403", async () => {
+  const { backend } = backendWithStatuses([{ status: 403 }]);
+
+  assert.deepEqual(await backend.getPhoneline("w0", "p0"), {
+    phonelinesAvailable: false,
+    note: "This sipgate account does not provide the phoneline feature.",
+  });
+});
+
+test("SipgateBackend does not attempt a phoneline mutation when its read is unavailable", async () => {
+  const { backend, requests } = backendWithStatuses([{ status: 403 }]);
+
+  assert.deepEqual(await backend.updatePhonelineAlias("w0", "p0", "Office"), {
+    before: null,
+    after: {
+      changed: false,
+      phonelinesAvailable: false,
+      note: "This sipgate account does not provide the phoneline feature; no change was attempted.",
+    },
+  });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]?.method, "GET");
+});
+
 test("SipgateBackend still surfaces non-feature errors from phonelines", async () => {
   const { backend } = backendWithStatuses([{ status: 500 }]);
 
@@ -450,6 +474,57 @@ const readEndpointCases: Array<{
     path: "/v2/w0/faxlines/f0/numbers",
     run: (backend) => backend.listFaxlineNumbers("w0", "f0"),
   },
+  {
+    name: "get_phoneline",
+    path: "/v2/w0/phonelines/p0",
+    run: (backend) => backend.getPhoneline("w0", "p0"),
+  },
+  {
+    name: "get_phoneline_block_anonymous",
+    path: "/v2/w0/phonelines/p0/blockanonymous",
+    run: (backend) => backend.getPhonelineBlockAnonymous("w0", "p0"),
+  },
+  {
+    name: "list_phoneline_devices",
+    path: "/v2/w0/phonelines/p0/devices",
+    run: (backend) => backend.listPhonelineDevices("w0", "p0"),
+  },
+  {
+    name: "list_parallel_forwardings",
+    path: "/v2/w0/phonelines/p0/parallelforwardings",
+    run: (backend) => backend.listParallelForwardings("w0", "p0"),
+  },
+  {
+    name: "list_phoneline_voicemails",
+    path: "/v2/w0/phonelines/p0/voicemails",
+    run: (backend) => backend.listPhonelineVoicemails("w0", "p0"),
+  },
+  {
+    name: "list_voicemail_greetings",
+    path: "/v2/w0/phonelines/p0/voicemails/v0/greetings",
+    run: (backend) => backend.listVoicemailGreetings("w0", "p0", "v0"),
+  },
+  { name: "list_voicemails", path: "/v2/voicemails", run: (backend) => backend.listVoicemails() },
+  {
+    name: "get_voicemail",
+    path: "/v2/voicemails/v0",
+    run: (backend) => backend.getVoicemail("v0"),
+  },
+  {
+    name: "list_autorecording_greetings",
+    path: "/v2/autorecordings/greetings",
+    run: (backend) => backend.listAutorecordingGreetings(),
+  },
+  {
+    name: "get_autorecording_settings",
+    path: "/v2/autorecordings/p0/settings",
+    run: (backend) => backend.getAutorecordingSettings("p0"),
+  },
+  {
+    name: "get_faxline_caller_id",
+    path: "/v2/w0/faxlines/f0/callerid",
+    run: (backend) => backend.getFaxlineCallerId("w0", "f0"),
+  },
 ];
 
 for (const endpoint of readEndpointCases) {
@@ -466,6 +541,7 @@ const readbackMutationCases: Array<{
   name: string;
   readPath: string;
   writePath: string;
+  writeMethod?: "POST" | "PUT" | "DELETE";
   body: JsonValue;
   run: (backend: SipgateBackend) => Promise<JsonValue>;
 }> = [
@@ -544,6 +620,136 @@ const readbackMutationCases: Array<{
       street: "Gladbacher Str.",
     }),
   },
+  {
+    name: "update_phoneline_alias",
+    readPath: "/v2/w0/phonelines/p0",
+    writePath: "/v2/w0/phonelines/p0",
+    body: { alias: "Office" },
+    run: (backend) => backend.updatePhonelineAlias("w0", "p0", "Office"),
+  },
+  {
+    name: "set_phoneline_block_anonymous",
+    readPath: "/v2/w0/phonelines/p0/blockanonymous",
+    writePath: "/v2/w0/phonelines/p0/blockanonymous",
+    body: { enabled: true, target: "VOICEMAIL" },
+    run: (backend) => backend.setPhonelineBlockAnonymous(
+      "w0",
+      "p0",
+      { enabled: true, target: "VOICEMAIL" },
+    ),
+  },
+  {
+    name: "attach_device_to_phoneline",
+    readPath: "/v2/w0/phonelines/p0/devices",
+    writePath: "/v2/w0/phonelines/p0/devices",
+    writeMethod: "POST",
+    body: { deviceId: "e0" },
+    run: (backend) => backend.attachDeviceToPhoneline("w0", "p0", "e0"),
+  },
+  {
+    name: "detach_device_from_phoneline",
+    readPath: "/v2/w0/phonelines/p0/devices",
+    writePath: "/v2/w0/phonelines/p0/devices/e0",
+    writeMethod: "DELETE",
+    body: null,
+    run: (backend) => backend.detachDeviceFromPhoneline("w0", "p0", "e0"),
+  },
+  {
+    name: "create_parallel_forwarding",
+    readPath: "/v2/w0/phonelines/p0/parallelforwardings",
+    writePath: "/v2/w0/phonelines/p0/parallelforwardings",
+    writeMethod: "POST",
+    body: { active: true, alias: "Mobile", destination: "+4915799912345" },
+    run: (backend) => backend.createParallelForwarding("w0", "p0", {
+      active: true,
+      alias: "Mobile",
+      destination: "+4915799912345",
+    }),
+  },
+  {
+    name: "update_parallel_forwarding",
+    readPath: "/v2/w0/phonelines/p0/parallelforwardings",
+    writePath: "/v2/w0/phonelines/p0/parallelforwardings/x0",
+    body: { active: false },
+    run: (backend) => backend.updateParallelForwarding("w0", "p0", "x0", { active: false }),
+  },
+  {
+    name: "delete_parallel_forwarding",
+    readPath: "/v2/w0/phonelines/p0/parallelforwardings",
+    writePath: "/v2/w0/phonelines/p0/parallelforwardings/x0",
+    writeMethod: "DELETE",
+    body: null,
+    run: (backend) => backend.deleteParallelForwarding("w0", "p0", "x0"),
+  },
+  {
+    name: "update_voicemail",
+    readPath: "/v2/w0/phonelines/p0/voicemails",
+    writePath: "/v2/w0/phonelines/p0/voicemails/v0",
+    body: { active: true, transcription: false, timeout: 20 },
+    run: (backend) => backend.updateVoicemail("w0", "p0", "v0", {
+      active: true,
+      transcription: false,
+      timeout: 20,
+    }),
+  },
+  {
+    name: "create_voicemail_greeting",
+    readPath: "/v2/w0/phonelines/p0/voicemails/v0/greetings",
+    writePath: "/v2/w0/phonelines/p0/voicemails/v0/greetings",
+    writeMethod: "POST",
+    body: { base64Content: "YWJj", filename: "greeting.mp3" },
+    run: (backend) => backend.createVoicemailGreeting("w0", "p0", "v0", {
+      base64Content: "YWJj",
+      filename: "greeting.mp3",
+    }),
+  },
+  {
+    name: "update_voicemail_greeting",
+    readPath: "/v2/w0/phonelines/p0/voicemails/v0/greetings",
+    writePath: "/v2/w0/phonelines/p0/voicemails/v0/greetings/g0",
+    body: { active: true },
+    run: (backend) => backend.updateVoicemailGreeting("w0", "p0", "v0", "g0", true),
+  },
+  {
+    name: "delete_voicemail_greeting",
+    readPath: "/v2/w0/phonelines/p0/voicemails/v0/greetings",
+    writePath: "/v2/w0/phonelines/p0/voicemails/v0/greetings/g0",
+    writeMethod: "DELETE",
+    body: null,
+    run: (backend) => backend.deleteVoicemailGreeting("w0", "p0", "v0", "g0"),
+  },
+  {
+    name: "set_voicemail_transcription",
+    readPath: "/v2/w0/phonelines/p0/voicemails",
+    writePath: "/v2/w0/phonelines/p0/voicemails/v0/transcriptions",
+    body: { active: true },
+    run: (backend) => backend.setVoicemailTranscription("w0", "p0", "v0", true),
+  },
+  {
+    name: "create_autorecording_greeting",
+    readPath: "/v2/autorecordings/greetings",
+    writePath: "/v2/autorecordings/greetings",
+    writeMethod: "POST",
+    body: { base64Content: "YWJj", filename: "notice.mp3" },
+    run: (backend) => backend.createAutorecordingGreeting({
+      base64Content: "YWJj",
+      filename: "notice.mp3",
+    }),
+  },
+  {
+    name: "set_autorecording_settings",
+    readPath: "/v2/autorecordings/p0/settings",
+    writePath: "/v2/autorecordings/p0/settings",
+    body: { active: true },
+    run: (backend) => backend.setAutorecordingSettings("p0", true),
+  },
+  {
+    name: "set_faxline_caller_id",
+    readPath: "/v2/w0/faxlines/f0/callerid",
+    writePath: "/v2/w0/faxlines/f0/callerid",
+    body: { value: "+49211123456" },
+    run: (backend) => backend.setFaxlineCallerId("w0", "f0", "+49211123456"),
+  },
 ];
 
 for (const endpoint of readbackMutationCases) {
@@ -562,8 +768,145 @@ for (const endpoint of readbackMutationCases) {
       path: new URL(request.url).pathname,
     })), [
       { method: "GET", path: endpoint.readPath },
-      { method: "PUT", path: endpoint.writePath },
+      { method: endpoint.writeMethod ?? "PUT", path: endpoint.writePath },
       { method: "GET", path: endpoint.readPath },
+    ]);
+    assert.equal(
+      requests[1]?.body,
+      endpoint.body === null ? undefined : JSON.stringify(endpoint.body),
+    );
+  });
+}
+
+const noReadbackMutationCases: Array<{
+  name: string;
+  path: string;
+  body?: JsonValue;
+  run: (backend: SipgateBackend) => Promise<MutationResult>;
+}> = [
+  {
+    name: "create_phoneline",
+    path: "/v2/w0/phonelines",
+    run: (backend) => backend.createPhoneline("w0"),
+  },
+  {
+    name: "play_voicemail",
+    path: "/v2/sessions/voicemail/play",
+    body: { datadId: "1000171", deviceId: "e0" },
+    run: (backend) => backend.playVoicemail({ dataId: "1000171", deviceId: "e0" }),
+  },
+  {
+    name: "record_voicemail_greeting",
+    path: "/v2/sessions/voicemail/recording",
+    body: { deviceId: "e0", endpoint: "MAIN", targetId: "v0" },
+    run: (backend) => backend.recordVoicemailGreeting({
+      deviceId: "e0",
+      endpoint: "MAIN",
+      targetId: "v0",
+    }),
+  },
+  {
+    name: "create_faxline",
+    path: "/v2/w0/faxlines",
+    run: (backend) => backend.createFaxline("w0"),
+  },
+];
+
+for (const endpoint of noReadbackMutationCases) {
+  test(`SipgateBackend implements ${endpoint.name} with documented no-read-back semantics`, async () => {
+    const { backend, requests } = backendWithResponses([{ id: "created" }]);
+
+    const result = await endpoint.run(backend);
+
+    assert.equal(result.before, null);
+    assert.equal(requests[0]?.method, "POST");
+    assert.equal(new URL(requests[0]?.url ?? "").pathname, endpoint.path);
+    assert.equal(
+      requests[0]?.body,
+      endpoint.body === undefined ? undefined : JSON.stringify(endpoint.body),
+    );
+  });
+}
+
+const deleteConfigurationCases: Array<{
+  name: string;
+  readResponse: JsonValue;
+  readPath: string;
+  deletePath: string;
+  run: (backend: SipgateBackend) => Promise<MutationResult>;
+}> = [
+  {
+    name: "delete_phoneline",
+    readResponse: { id: "p0" },
+    readPath: "/v2/w0/phonelines/p0",
+    deletePath: "/v2/w0/phonelines/p0",
+    run: (backend) => backend.deletePhoneline("w0", "p0"),
+  },
+  {
+    name: "delete_autorecording_greeting",
+    readResponse: { id: "ag0" },
+    readPath: "/v2/autorecordings/greetings",
+    deletePath: "/v2/autorecordings/greetings/ag0",
+    run: (backend) => backend.deleteAutorecordingGreeting("ag0"),
+  },
+  {
+    name: "delete_faxline",
+    readResponse: { items: [{ id: "f0", alias: "Fax" }] },
+    readPath: "/v2/w0/faxlines",
+    deletePath: "/v2/w0/faxlines/f0",
+    run: (backend) => backend.deleteFaxline("w0", "f0"),
+  },
+];
+
+for (const endpoint of deleteConfigurationCases) {
+  test(`SipgateBackend implements ${endpoint.name} with a before snapshot`, async () => {
+    const { backend, requests } = backendWithResponses([endpoint.readResponse, null]);
+
+    const result = await endpoint.run(backend);
+
+    assert.equal((result.after as { deleted?: boolean }).deleted, true);
+    assert.deepEqual(requests.map((request) => ({
+      method: request.method,
+      path: new URL(request.url).pathname,
+    })), [
+      { method: "GET", path: endpoint.readPath },
+      { method: "DELETE", path: endpoint.deletePath },
+    ]);
+  });
+}
+
+for (const endpoint of [
+  {
+    name: "update_faxline_alias",
+    path: "/v2/w0/faxlines/f0",
+    body: { alias: "Office fax" },
+    run: (backend: SipgateBackend) => backend.updateFaxlineAlias("w0", "f0", "Office fax"),
+  },
+  {
+    name: "set_faxline_tagline",
+    path: "/v2/w0/faxlines/f0/tagline",
+    body: { value: "Example Ltd." },
+    run: (backend: SipgateBackend) => backend.setFaxlineTagline("w0", "f0", "Example Ltd."),
+  },
+]) {
+  test(`SipgateBackend implements ${endpoint.name} with faxline read-back`, async () => {
+    const { backend, requests } = backendWithResponses([
+      { items: [{ id: "f0", alias: "Before" }] },
+      null,
+      { items: [{ id: "f0", alias: "After" }] },
+    ]);
+
+    assert.deepEqual(await endpoint.run(backend), {
+      before: { id: "f0", alias: "Before" },
+      after: { id: "f0", alias: "After" },
+    });
+    assert.deepEqual(requests.map((request) => ({
+      method: request.method,
+      path: new URL(request.url).pathname,
+    })), [
+      { method: "GET", path: "/v2/w0/faxlines" },
+      { method: "PUT", path: endpoint.path },
+      { method: "GET", path: "/v2/w0/faxlines" },
     ]);
     assert.equal(requests[1]?.body, JSON.stringify(endpoint.body));
   });

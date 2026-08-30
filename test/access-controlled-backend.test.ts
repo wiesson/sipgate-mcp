@@ -7,6 +7,7 @@ import {
 import type {
   AddressUpdateInput,
   AuthenticatedUserContext,
+  BlockAnonymousInput,
   CallEmailNotificationInput,
   CallSmsNotificationInput,
   CallTransferInput,
@@ -16,18 +17,23 @@ import type {
   FaxReportNotificationInput,
   FaxSmsNotificationInput,
   ForwardingRule,
+  GreetingUploadInput,
   HistoryQuery,
   JsonObject,
   JsonValue,
   LocalPrefixInput,
   MutationResult,
   PaginationInput,
+  ParallelForwardingInput,
   QuickDialInput,
   ResendFaxInput,
   SendFaxInput,
   SmsEmailNotificationInput,
   TelephonyBackend,
   VoicemailEmailNotificationInput,
+  VoicemailPlaybackInput,
+  VoicemailRecordingInput,
+  VoicemailSettingsInput,
   VoicemailSmsNotificationInput,
 } from "../src/backend/telephony-backend.js";
 
@@ -82,6 +88,9 @@ class FakeBackend implements TelephonyBackend {
     voicemail: [],
   };
   public faxlines: JsonValue = { items: [{ id: "f0", canSend: true }] };
+  public voicemails: JsonValue = { items: [{ id: "v0", active: true }] };
+  public greetings: JsonValue = { items: [{ id: "g0", active: true }] };
+  public parallelForwardings: JsonValue = { items: [{ id: "x0", active: true }] };
 
   private record(method: string, args: unknown[], result: JsonValue): Promise<JsonValue> {
     this.calls.push({ method, args });
@@ -138,6 +147,34 @@ class FakeBackend implements TelephonyBackend {
       items: object.users?.[0]?.phonelines ?? [],
     });
   }
+  getPhoneline(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.record("getPhoneline", [userId, phonelineId], { id: phonelineId });
+  }
+  getPhonelineBlockAnonymous(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.record("getPhonelineBlockAnonymous", [userId, phonelineId], { enabled: false });
+  }
+  listPhonelineDevices(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.record("listPhonelineDevices", [userId, phonelineId], this.devices);
+  }
+  listParallelForwardings(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.record("listParallelForwardings", [userId, phonelineId], this.parallelForwardings);
+  }
+  listPhonelineVoicemails(userId: string, phonelineId: string): Promise<JsonValue> {
+    return this.record("listPhonelineVoicemails", [userId, phonelineId], this.voicemails);
+  }
+  listVoicemailGreetings(userId: string, phonelineId: string, voicemailId: string): Promise<JsonValue> {
+    return this.record("listVoicemailGreetings", [userId, phonelineId, voicemailId], this.greetings);
+  }
+  listVoicemails(): Promise<JsonValue> { return this.record("listVoicemails", [], this.voicemails); }
+  getVoicemail(voicemailId: string): Promise<JsonValue> {
+    return this.record("getVoicemail", [voicemailId], { id: voicemailId });
+  }
+  listAutorecordingGreetings(): Promise<JsonValue> {
+    return this.record("listAutorecordingGreetings", [], { id: "ag0" });
+  }
+  getAutorecordingSettings(extension: string): Promise<JsonValue> {
+    return this.record("getAutorecordingSettings", [extension], { active: false });
+  }
   listDevices(userId?: string, types?: DeviceType[]): Promise<JsonValue> {
     return this.record("listDevices", [userId, types], this.devices);
   }
@@ -192,6 +229,9 @@ class FakeBackend implements TelephonyBackend {
       items: [{ id: "fn0", number: "+49211123456" }],
     });
   }
+  getFaxlineCallerId(userId: string, faxlineId: string): Promise<JsonValue> {
+    return this.record("getFaxlineCallerId", [userId, faxlineId], { value: "+49211123456" });
+  }
   getSettings(userId?: string): Promise<JsonValue> {
     return this.record("getSettings", [userId], { users: [{ user: { id: userId ?? null } }] });
   }
@@ -203,6 +243,113 @@ class FakeBackend implements TelephonyBackend {
   }
   setForwarding(userId: string, phonelineId: string, forwardings: ForwardingRule[]): Promise<MutationResult> {
     return this.mutation("setForwarding", [userId, phonelineId, forwardings]);
+  }
+  createPhoneline(userId: string): Promise<MutationResult> {
+    return this.mutation("createPhoneline", [userId]);
+  }
+  updatePhonelineAlias(userId: string, phonelineId: string, alias?: string): Promise<MutationResult> {
+    return this.mutation("updatePhonelineAlias", [userId, phonelineId, alias]);
+  }
+  deletePhoneline(userId: string, phonelineId: string): Promise<MutationResult> {
+    return this.mutation("deletePhoneline", [userId, phonelineId]);
+  }
+  setPhonelineBlockAnonymous(userId: string, phonelineId: string, input: BlockAnonymousInput): Promise<MutationResult> {
+    return this.mutation("setPhonelineBlockAnonymous", [userId, phonelineId, input]);
+  }
+  attachDeviceToPhoneline(userId: string, phonelineId: string, deviceId: string): Promise<MutationResult> {
+    return this.mutation("attachDeviceToPhoneline", [userId, phonelineId, deviceId]);
+  }
+  detachDeviceFromPhoneline(userId: string, phonelineId: string, deviceId: string): Promise<MutationResult> {
+    return this.mutation("detachDeviceFromPhoneline", [userId, phonelineId, deviceId]);
+  }
+  createParallelForwarding(userId: string, phonelineId: string, input: ParallelForwardingInput): Promise<MutationResult> {
+    return this.mutation("createParallelForwarding", [userId, phonelineId, input]);
+  }
+  updateParallelForwarding(
+    userId: string,
+    phonelineId: string,
+    parallelForwardingId: string,
+    input: ParallelForwardingInput,
+  ): Promise<MutationResult> {
+    return this.mutation("updateParallelForwarding", [userId, phonelineId, parallelForwardingId, input]);
+  }
+  deleteParallelForwarding(
+    userId: string,
+    phonelineId: string,
+    parallelForwardingId: string,
+  ): Promise<MutationResult> {
+    return this.mutation("deleteParallelForwarding", [userId, phonelineId, parallelForwardingId]);
+  }
+  updateVoicemail(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    input: VoicemailSettingsInput,
+  ): Promise<MutationResult> {
+    return this.mutation("updateVoicemail", [userId, phonelineId, voicemailId, input]);
+  }
+  createVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    input: GreetingUploadInput,
+  ): Promise<MutationResult> {
+    return this.mutation("createVoicemailGreeting", [userId, phonelineId, voicemailId, input]);
+  }
+  updateVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    greetingId: string,
+    active?: boolean,
+  ): Promise<MutationResult> {
+    return this.mutation("updateVoicemailGreeting", [userId, phonelineId, voicemailId, greetingId, active]);
+  }
+  deleteVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    greetingId: string,
+  ): Promise<MutationResult> {
+    return this.mutation("deleteVoicemailGreeting", [userId, phonelineId, voicemailId, greetingId]);
+  }
+  setVoicemailTranscription(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    active?: boolean,
+  ): Promise<MutationResult> {
+    return this.mutation("setVoicemailTranscription", [userId, phonelineId, voicemailId, active]);
+  }
+  playVoicemail(input: VoicemailPlaybackInput): Promise<MutationResult> {
+    return this.mutation("playVoicemail", [input]);
+  }
+  recordVoicemailGreeting(input: VoicemailRecordingInput): Promise<MutationResult> {
+    return this.mutation("recordVoicemailGreeting", [input]);
+  }
+  createAutorecordingGreeting(input: GreetingUploadInput): Promise<MutationResult> {
+    return this.mutation("createAutorecordingGreeting", [input]);
+  }
+  deleteAutorecordingGreeting(greetingId: string): Promise<MutationResult> {
+    return this.mutation("deleteAutorecordingGreeting", [greetingId]);
+  }
+  setAutorecordingSettings(extension: string, active?: boolean): Promise<MutationResult> {
+    return this.mutation("setAutorecordingSettings", [extension, active]);
+  }
+  createFaxline(userId: string): Promise<MutationResult> {
+    return this.mutation("createFaxline", [userId]);
+  }
+  updateFaxlineAlias(userId: string, faxlineId: string, alias?: string): Promise<MutationResult> {
+    return this.mutation("updateFaxlineAlias", [userId, faxlineId, alias]);
+  }
+  deleteFaxline(userId: string, faxlineId: string): Promise<MutationResult> {
+    return this.mutation("deleteFaxline", [userId, faxlineId]);
+  }
+  setFaxlineCallerId(userId: string, faxlineId: string, value?: string): Promise<MutationResult> {
+    return this.mutation("setFaxlineCallerId", [userId, faxlineId, value]);
+  }
+  setFaxlineTagline(userId: string, faxlineId: string, value?: string): Promise<MutationResult> {
+    return this.mutation("setFaxlineTagline", [userId, faxlineId, value]);
   }
   setDnd(deviceId: string, enabled: boolean): Promise<MutationResult> {
     return this.mutation("setDnd", [deviceId, enabled]);
@@ -525,6 +672,8 @@ test("user scope rejects foreign device IDs for every new device-targeted operat
     () => backend.setExternalDeviceTargetNumber("e9", "+49211234567"),
     () => backend.setExternalDeviceIncomingCallDisplay("e9", "CALLER_NUMBER"),
     () => backend.changeDevicePassword("e9"),
+    () => backend.attachDeviceToPhoneline("w0", "p0", "e9"),
+    () => backend.detachDeviceFromPhoneline("w0", "p0", "e9"),
   ];
 
   for (const operation of operations) await assert.rejects(operation(), AccessPolicyError);
@@ -539,6 +688,8 @@ test("user scope rejects foreign device IDs for every new device-targeted operat
     "setExternalDeviceTargetNumber",
     "setExternalDeviceIncomingCallDisplay",
     "changeDevicePassword",
+    "attachDeviceToPhoneline",
+    "detachDeviceFromPhoneline",
   ].includes(call.method)), false);
 });
 
@@ -821,6 +972,153 @@ test("user scope rejects a foreign faxline", async () => {
     AccessPolicyError,
   );
   assert.equal(delegate.calls.some((call) => ["listFaxlineNumbers", "sendFax"].includes(call.method)), false);
+});
+
+test("user scope rejects a foreign phoneline for every new phoneline operation", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+  const operations: Array<() => Promise<unknown>> = [
+    () => backend.getPhoneline("w0", "p9"),
+    () => backend.getPhonelineBlockAnonymous("w0", "p9"),
+    () => backend.listPhonelineDevices("w0", "p9"),
+    () => backend.listParallelForwardings("w0", "p9"),
+    () => backend.listPhonelineVoicemails("w0", "p9"),
+    () => backend.updatePhonelineAlias("w0", "p9", "Foreign"),
+    () => backend.deletePhoneline("w0", "p9"),
+    () => backend.setPhonelineBlockAnonymous("w0", "p9", { enabled: true }),
+    () => backend.createParallelForwarding("w0", "p9", { active: true }),
+    () => backend.getAutorecordingSettings("p9"),
+    () => backend.setAutorecordingSettings("p9", true),
+  ];
+
+  for (const operation of operations) await assert.rejects(operation(), AccessPolicyError);
+  assert.equal(delegate.calls.some((call) => [
+    "getPhoneline",
+    "getPhonelineBlockAnonymous",
+    "listPhonelineDevices",
+    "listParallelForwardings",
+    "listPhonelineVoicemails",
+    "updatePhonelineAlias",
+    "deletePhoneline",
+    "setPhonelineBlockAnonymous",
+    "createParallelForwarding",
+    "getAutorecordingSettings",
+    "setAutorecordingSettings",
+  ].includes(call.method)), false);
+});
+
+test("user scope rejects a foreign voicemail", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await assert.rejects(backend.getVoicemail("v9"), AccessPolicyError);
+  await assert.rejects(
+    backend.updateVoicemail("w0", "p0", "v9", { active: true, transcription: false }),
+    AccessPolicyError,
+  );
+  await assert.rejects(
+    backend.recordVoicemailGreeting({ deviceId: "e0", targetId: "v9", endpoint: "MAIN" }),
+    AccessPolicyError,
+  );
+  assert.equal(delegate.calls.some((call) => [
+    "getVoicemail",
+    "updateVoicemail",
+    "recordVoicemailGreeting",
+  ].includes(call.method)), false);
+});
+
+test("user scope rejects a foreign voicemail greeting", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await assert.rejects(
+    backend.updateVoicemailGreeting("w0", "p0", "v0", "g9", true),
+    AccessPolicyError,
+  );
+  await assert.rejects(
+    backend.deleteVoicemailGreeting("w0", "p0", "v0", "g9"),
+    AccessPolicyError,
+  );
+  assert.equal(delegate.calls.some((call) => [
+    "updateVoicemailGreeting",
+    "deleteVoicemailGreeting",
+  ].includes(call.method)), false);
+});
+
+test("user scope rejects foreign nested recording and forwarding resources", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await assert.rejects(
+    backend.updateParallelForwarding("w0", "p0", "x9", { active: false }),
+    AccessPolicyError,
+  );
+  await assert.rejects(
+    backend.deleteParallelForwarding("w0", "p0", "x9"),
+    AccessPolicyError,
+  );
+  await assert.rejects(backend.deleteAutorecordingGreeting("ag9"), AccessPolicyError);
+  await assert.rejects(
+    backend.playVoicemail({ deviceId: "e0", dataId: "foreign-history" }),
+    AccessPolicyError,
+  );
+  await assert.rejects(
+    backend.setFaxlineCallerId("w0", "f0", "+49211999999"),
+    AccessPolicyError,
+  );
+  assert.equal(delegate.calls.some((call) => [
+    "updateParallelForwarding",
+    "deleteParallelForwarding",
+    "deleteAutorecordingGreeting",
+    "playVoicemail",
+    "setFaxlineCallerId",
+  ].includes(call.method)), false);
+});
+
+test("user scope rejects a foreign faxline for every new faxline configuration operation", async () => {
+  const delegate = new FakeBackend();
+  const backend = await createAccessControlledBackend(delegate, "user");
+  const operations: Array<() => Promise<unknown>> = [
+    () => backend.getFaxlineCallerId("w0", "f9"),
+    () => backend.updateFaxlineAlias("w0", "f9", "Foreign"),
+    () => backend.deleteFaxline("w0", "f9"),
+    () => backend.setFaxlineCallerId("w0", "f9", "+49211123456"),
+    () => backend.setFaxlineTagline("w0", "f9", "Foreign"),
+    () => backend.getAutorecordingSettings("f9"),
+  ];
+
+  for (const operation of operations) await assert.rejects(operation(), AccessPolicyError);
+  assert.equal(delegate.calls.some((call) => [
+    "getFaxlineCallerId",
+    "updateFaxlineAlias",
+    "deleteFaxline",
+    "setFaxlineCallerId",
+    "setFaxlineTagline",
+    "getAutorecordingSettings",
+  ].includes(call.method)), false);
+});
+
+test("phoneline-less user scope returns unavailable instead of treating an absent feature as ownership", async () => {
+  const delegate = new FakeBackend();
+  delegate.listPhonelines = async (userId: string): Promise<JsonValue> => {
+    delegate.calls.push({ method: "listPhonelines", args: [userId] });
+    return { items: [], phonelinesAvailable: false };
+  };
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  assert.deepEqual(await backend.getPhoneline("w0", "p0"), {
+    phonelinesAvailable: false,
+    note: "This sipgate account does not provide the phoneline feature.",
+  });
+  assert.deepEqual(await backend.updatePhonelineAlias("w0", "p0", "Office"), {
+    before: null,
+    after: {
+      changed: false,
+      phonelinesAvailable: false,
+      note: "This sipgate account does not provide the phoneline feature; no change was attempted.",
+    },
+  });
+  assert.equal(delegate.calls.some((call) => ["getPhoneline", "updatePhonelineAlias"].includes(call.method)), false);
 });
 
 test("user scope does not own a foreign call merely because its remote party is an owned number", async () => {

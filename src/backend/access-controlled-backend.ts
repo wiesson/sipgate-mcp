@@ -2,6 +2,7 @@ import type {
   AddressUpdateInput,
   AccessScope,
   AuthenticatedUserContext,
+  BlockAnonymousInput,
   CallEmailNotificationInput,
   CallSmsNotificationInput,
   CallTransferInput,
@@ -11,18 +12,23 @@ import type {
   FaxReportNotificationInput,
   FaxSmsNotificationInput,
   ForwardingRule,
+  GreetingUploadInput,
   HistoryQuery,
   JsonObject,
   JsonValue,
   LocalPrefixInput,
   MutationResult,
   PaginationInput,
+  ParallelForwardingInput,
   QuickDialInput,
   ResendFaxInput,
   SendFaxInput,
   SmsEmailNotificationInput,
   TelephonyBackend,
   VoicemailEmailNotificationInput,
+  VoicemailPlaybackInput,
+  VoicemailRecordingInput,
+  VoicemailSettingsInput,
   VoicemailSmsNotificationInput,
 } from "./telephony-backend.js";
 
@@ -37,6 +43,11 @@ interface OwnedNumbers {
   numberIds: Set<string>;
   phoneNumbers: Set<string>;
   addressIds: Set<string>;
+}
+
+interface OwnershipState {
+  ids: Set<string>;
+  available: boolean;
 }
 
 function asObject(value: JsonValue | undefined): JsonObject | undefined {
@@ -100,6 +111,25 @@ function withAccessScope(value: JsonValue, context: AuthenticatedUserContext, sc
     : { value, authenticatedUser: context.identity, accessScope: scope };
 }
 
+function unavailablePhonelineRead(items = false): JsonValue {
+  return {
+    ...(items ? { items: [] } : {}),
+    phonelinesAvailable: false,
+    note: "This sipgate account does not provide the phoneline feature.",
+  };
+}
+
+function unavailablePhonelineMutation(): MutationResult {
+  return {
+    before: null,
+    after: {
+      changed: false,
+      phonelinesAvailable: false,
+      note: "This sipgate account does not provide the phoneline feature; no change was attempted.",
+    },
+  };
+}
+
 /**
  * Enforces MCP-level resource boundaries in addition to sipgate's own role and
  * token-scope checks. Account scope is rejected unless sipgate identifies the
@@ -155,6 +185,117 @@ export class AccessControlledBackend implements TelephonyBackend {
   public listPhonelines(userId: string): Promise<JsonValue> {
     this.assertUser(userId);
     return this.delegate.listPhonelines(userId);
+  }
+
+  public async getPhoneline(userId: string, phonelineId: string): Promise<JsonValue> {
+    this.assertUser(userId);
+    if (this.scope === "user" && !await this.assertOwnedPhoneline(phonelineId)) {
+      return unavailablePhonelineRead();
+    }
+    return this.delegate.getPhoneline(userId, phonelineId);
+  }
+
+  public async getPhonelineBlockAnonymous(
+    userId: string,
+    phonelineId: string,
+  ): Promise<JsonValue> {
+    this.assertUser(userId);
+    if (this.scope === "user" && !await this.assertOwnedPhoneline(phonelineId)) {
+      return unavailablePhonelineRead();
+    }
+    return this.delegate.getPhonelineBlockAnonymous(userId, phonelineId);
+  }
+
+  public async listPhonelineDevices(
+    userId: string,
+    phonelineId: string,
+  ): Promise<JsonValue> {
+    this.assertUser(userId);
+    if (this.scope === "user" && !await this.assertOwnedPhoneline(phonelineId)) {
+      return unavailablePhonelineRead(true);
+    }
+    const response = await this.delegate.listPhonelineDevices(userId, phonelineId);
+    if (this.scope === "account" || asObject(response)?.phonelinesAvailable === false) {
+      return response;
+    }
+    try {
+      const deviceIds = await this.ownedDeviceIds();
+      return {
+        ...asObject(response),
+        items: items(response).filter((device) => {
+          const deviceId = stringField(device, "id");
+          return deviceId !== undefined && deviceIds.has(deviceId);
+        }),
+      };
+    } catch {
+      throw new AccessPolicyError(
+        "User scope could not establish ownership of the phoneline's attached devices.",
+      );
+    }
+  }
+
+  public async listParallelForwardings(
+    userId: string,
+    phonelineId: string,
+  ): Promise<JsonValue> {
+    this.assertUser(userId);
+    if (this.scope === "user" && !await this.assertOwnedPhoneline(phonelineId)) {
+      return unavailablePhonelineRead(true);
+    }
+    return this.delegate.listParallelForwardings(userId, phonelineId);
+  }
+
+  public async listPhonelineVoicemails(
+    userId: string,
+    phonelineId: string,
+  ): Promise<JsonValue> {
+    this.assertUser(userId);
+    if (this.scope === "user" && !await this.assertOwnedPhoneline(phonelineId)) {
+      return unavailablePhonelineRead(true);
+    }
+    return this.delegate.listPhonelineVoicemails(userId, phonelineId);
+  }
+
+  public async listVoicemailGreetings(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+  ): Promise<JsonValue> {
+    this.assertUser(userId);
+    if (this.scope === "user" && !await this.assertOwnedVoicemail(phonelineId, voicemailId)) {
+      return unavailablePhonelineRead(true);
+    }
+    return this.delegate.listVoicemailGreetings(userId, phonelineId, voicemailId);
+  }
+
+  public async listVoicemails(): Promise<JsonValue> {
+    if (this.scope === "account") return this.delegate.listVoicemails();
+    const owned = await this.ownedVoicemailState();
+    if (!owned.available) return unavailablePhonelineRead(true);
+    const response = await this.delegate.listVoicemails();
+    return {
+      ...asObject(response),
+      items: items(response).filter((voicemail) => {
+        const voicemailId = stringField(voicemail, "id");
+        return voicemailId !== undefined && owned.ids.has(voicemailId);
+      }),
+    };
+  }
+
+  public async getVoicemail(voicemailId: string): Promise<JsonValue> {
+    if (this.scope === "user" && !await this.assertOwnedVoicemailId(voicemailId)) {
+      return unavailablePhonelineRead();
+    }
+    return this.delegate.getVoicemail(voicemailId);
+  }
+
+  public listAutorecordingGreetings(): Promise<JsonValue> {
+    return this.delegate.listAutorecordingGreetings();
+  }
+
+  public async getAutorecordingSettings(extension: string): Promise<JsonValue> {
+    if (this.scope === "user") await this.assertOwnedAutorecordingExtension(extension);
+    return this.delegate.getAutorecordingSettings(extension);
   }
 
   public listDevices(userId?: string, types?: DeviceType[]): Promise<JsonValue> {
@@ -305,6 +446,12 @@ export class AccessControlledBackend implements TelephonyBackend {
     return this.delegate.listFaxlineNumbers(userId, faxlineId);
   }
 
+  public async getFaxlineCallerId(userId: string, faxlineId: string): Promise<JsonValue> {
+    this.assertUser(userId);
+    if (this.scope === "user") await this.assertOwnedFaxline(faxlineId);
+    return this.delegate.getFaxlineCallerId(userId, faxlineId);
+  }
+
   public async getHistoryEntry(entryId: string): Promise<JsonValue> {
     if (this.scope === "user") await this.assertOwnedHistoryEntry(entryId);
     return this.delegate.getHistoryEntry(entryId);
@@ -355,16 +502,311 @@ export class AccessControlledBackend implements TelephonyBackend {
   ): Promise<MutationResult> {
     if (this.scope === "user") {
       this.assertUser(userId);
-      try {
-        this.assertOwned(await this.ownedPhonelineIds(), phonelineId, "phoneline");
-      } catch (error) {
-        if (error instanceof AccessPolicyError) throw error;
+      if (!await this.assertOwnedPhoneline(phonelineId)) return unavailablePhonelineMutation();
+    }
+    return this.delegate.setForwarding(userId, phonelineId, forwardings);
+  }
+
+  public createPhoneline(userId: string): Promise<MutationResult> {
+    this.assertUser(userId);
+    return this.delegate.createPhoneline(userId);
+  }
+
+  public async updatePhonelineAlias(
+    userId: string,
+    phonelineId: string,
+    alias?: string,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (this.scope === "user" && !await this.assertOwnedPhoneline(phonelineId)) {
+      return unavailablePhonelineMutation();
+    }
+    return this.delegate.updatePhonelineAlias(userId, phonelineId, alias);
+  }
+
+  public async deletePhoneline(
+    userId: string,
+    phonelineId: string,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (this.scope === "user" && !await this.assertOwnedPhoneline(phonelineId)) {
+      return unavailablePhonelineMutation();
+    }
+    return this.delegate.deletePhoneline(userId, phonelineId);
+  }
+
+  public async setPhonelineBlockAnonymous(
+    userId: string,
+    phonelineId: string,
+    input: BlockAnonymousInput,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (this.scope === "user" && !await this.assertOwnedPhoneline(phonelineId)) {
+      return unavailablePhonelineMutation();
+    }
+    return this.delegate.setPhonelineBlockAnonymous(userId, phonelineId, input);
+  }
+
+  public async attachDeviceToPhoneline(
+    userId: string,
+    phonelineId: string,
+    deviceId: string,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (this.scope === "user") {
+      if (!await this.assertOwnedPhoneline(phonelineId)) return unavailablePhonelineMutation();
+      await this.assertOwnedDevice(deviceId);
+    }
+    return this.delegate.attachDeviceToPhoneline(userId, phonelineId, deviceId);
+  }
+
+  public async detachDeviceFromPhoneline(
+    userId: string,
+    phonelineId: string,
+    deviceId: string,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (this.scope === "user") {
+      if (!await this.assertOwnedPhoneline(phonelineId)) return unavailablePhonelineMutation();
+      await this.assertOwnedDevice(deviceId);
+    }
+    return this.delegate.detachDeviceFromPhoneline(userId, phonelineId, deviceId);
+  }
+
+  public async createParallelForwarding(
+    userId: string,
+    phonelineId: string,
+    input: ParallelForwardingInput,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (this.scope === "user" && !await this.assertOwnedPhoneline(phonelineId)) {
+      return unavailablePhonelineMutation();
+    }
+    return this.delegate.createParallelForwarding(userId, phonelineId, input);
+  }
+
+  public async updateParallelForwarding(
+    userId: string,
+    phonelineId: string,
+    parallelForwardingId: string,
+    input: ParallelForwardingInput,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (
+      this.scope === "user"
+      && !await this.assertOwnedParallelForwarding(phonelineId, parallelForwardingId)
+    ) return unavailablePhonelineMutation();
+    return this.delegate.updateParallelForwarding(
+      userId,
+      phonelineId,
+      parallelForwardingId,
+      input,
+    );
+  }
+
+  public async deleteParallelForwarding(
+    userId: string,
+    phonelineId: string,
+    parallelForwardingId: string,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (
+      this.scope === "user"
+      && !await this.assertOwnedParallelForwarding(phonelineId, parallelForwardingId)
+    ) return unavailablePhonelineMutation();
+    return this.delegate.deleteParallelForwarding(userId, phonelineId, parallelForwardingId);
+  }
+
+  public async updateVoicemail(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    input: VoicemailSettingsInput,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (this.scope === "user" && !await this.assertOwnedVoicemail(phonelineId, voicemailId)) {
+      return unavailablePhonelineMutation();
+    }
+    return this.delegate.updateVoicemail(userId, phonelineId, voicemailId, input);
+  }
+
+  public async createVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    input: GreetingUploadInput,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (this.scope === "user" && !await this.assertOwnedVoicemail(phonelineId, voicemailId)) {
+      return unavailablePhonelineMutation();
+    }
+    return this.delegate.createVoicemailGreeting(userId, phonelineId, voicemailId, input);
+  }
+
+  public async updateVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    greetingId: string,
+    active?: boolean,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (
+      this.scope === "user"
+      && !await this.assertOwnedGreeting(phonelineId, voicemailId, greetingId)
+    ) return unavailablePhonelineMutation();
+    return this.delegate.updateVoicemailGreeting(
+      userId,
+      phonelineId,
+      voicemailId,
+      greetingId,
+      active,
+    );
+  }
+
+  public async deleteVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    greetingId: string,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (
+      this.scope === "user"
+      && !await this.assertOwnedGreeting(phonelineId, voicemailId, greetingId)
+    ) return unavailablePhonelineMutation();
+    return this.delegate.deleteVoicemailGreeting(
+      userId,
+      phonelineId,
+      voicemailId,
+      greetingId,
+    );
+  }
+
+  public async setVoicemailTranscription(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    active?: boolean,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (this.scope === "user" && !await this.assertOwnedVoicemail(phonelineId, voicemailId)) {
+      return unavailablePhonelineMutation();
+    }
+    return this.delegate.setVoicemailTranscription(userId, phonelineId, voicemailId, active);
+  }
+
+  public async playVoicemail(input: VoicemailPlaybackInput): Promise<MutationResult> {
+    if (this.scope === "user") {
+      if (!input.deviceId || !input.dataId) {
         throw new AccessPolicyError(
-          "User scope could not establish ownership of the requested phoneline.",
+          "User scope requires both device and voicemail-data IDs to establish playback ownership.",
+        );
+      }
+      await this.assertOwnedDevice(input.deviceId);
+      await this.assertOwnedHistoryEntry(input.dataId);
+    }
+    return this.delegate.playVoicemail(input);
+  }
+
+  public async recordVoicemailGreeting(
+    input: VoicemailRecordingInput,
+  ): Promise<MutationResult> {
+    if (this.scope === "user") {
+      if (!input.deviceId || !input.targetId) {
+        throw new AccessPolicyError(
+          "User scope requires both device and target voicemail IDs to establish recording ownership.",
+        );
+      }
+      await this.assertOwnedDevice(input.deviceId);
+      if (!await this.assertOwnedVoicemailId(input.targetId)) return unavailablePhonelineMutation();
+    }
+    return this.delegate.recordVoicemailGreeting(input);
+  }
+
+  public createAutorecordingGreeting(input: GreetingUploadInput): Promise<MutationResult> {
+    return this.delegate.createAutorecordingGreeting(input);
+  }
+
+  public async deleteAutorecordingGreeting(greetingId: string): Promise<MutationResult> {
+    if (this.scope === "user") {
+      let greeting: JsonObject | undefined;
+      try {
+        greeting = asObject(await this.delegate.listAutorecordingGreetings());
+      } catch {
+        throw new AccessPolicyError(
+          "User scope could not establish ownership of the automated-recording greeting.",
+        );
+      }
+      if (greeting?.autorecordingsAvailable === false) {
+        return {
+          before: null,
+          after: {
+            changed: false,
+            autorecordingsAvailable: false,
+            note: "Automated call recording is not activated; no change was attempted.",
+          },
+        };
+      }
+      if (stringField(greeting ?? {}, "id") !== greetingId) {
+        throw new AccessPolicyError(
+          "User scope does not permit access to the requested automated-recording greeting.",
         );
       }
     }
-    return this.delegate.setForwarding(userId, phonelineId, forwardings);
+    return this.delegate.deleteAutorecordingGreeting(greetingId);
+  }
+
+  public async setAutorecordingSettings(
+    extension: string,
+    active?: boolean,
+  ): Promise<MutationResult> {
+    if (this.scope === "user") await this.assertOwnedAutorecordingExtension(extension);
+    return this.delegate.setAutorecordingSettings(extension, active);
+  }
+
+  public createFaxline(userId: string): Promise<MutationResult> {
+    this.assertUser(userId);
+    return this.delegate.createFaxline(userId);
+  }
+
+  public async updateFaxlineAlias(
+    userId: string,
+    faxlineId: string,
+    alias?: string,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (this.scope === "user") await this.assertOwnedFaxline(faxlineId);
+    return this.delegate.updateFaxlineAlias(userId, faxlineId, alias);
+  }
+
+  public async deleteFaxline(userId: string, faxlineId: string): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (this.scope === "user") await this.assertOwnedFaxline(faxlineId);
+    return this.delegate.deleteFaxline(userId, faxlineId);
+  }
+
+  public async setFaxlineCallerId(
+    userId: string,
+    faxlineId: string,
+    value?: string,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (this.scope === "user") {
+      await this.assertOwnedFaxline(faxlineId);
+      if (value) await this.assertOwnedPhoneNumber(value, "fax caller ID phone number");
+    }
+    return this.delegate.setFaxlineCallerId(userId, faxlineId, value);
+  }
+
+  public async setFaxlineTagline(
+    userId: string,
+    faxlineId: string,
+    value?: string,
+  ): Promise<MutationResult> {
+    this.assertUser(userId);
+    if (this.scope === "user") await this.assertOwnedFaxline(faxlineId);
+    return this.delegate.setFaxlineTagline(userId, faxlineId, value);
   }
 
   public async setDnd(deviceId: string, enabled: boolean): Promise<MutationResult> {
@@ -602,17 +1044,23 @@ export class AccessControlledBackend implements TelephonyBackend {
     return this.delegate.createSmsEmailNotification(input);
   }
 
-  public createVoicemailEmailNotification(
+  public async createVoicemailEmailNotification(
     input: VoicemailEmailNotificationInput,
   ): Promise<MutationResult> {
     this.assertUser(input.userId);
+    if (this.scope === "user" && !await this.assertOwnedVoicemailId(input.voicemailId)) {
+      return unavailablePhonelineMutation();
+    }
     return this.delegate.createVoicemailEmailNotification(input);
   }
 
-  public createVoicemailSmsNotification(
+  public async createVoicemailSmsNotification(
     input: VoicemailSmsNotificationInput,
   ): Promise<MutationResult> {
     this.assertUser(input.userId);
+    if (this.scope === "user" && !await this.assertOwnedVoicemailId(input.voicemailId)) {
+      return unavailablePhonelineMutation();
+    }
     return this.delegate.createVoicemailSmsNotification(input);
   }
 
@@ -762,13 +1210,7 @@ export class AccessControlledBackend implements TelephonyBackend {
 
   private async assertOwnedFaxline(faxlineId: string): Promise<void> {
     try {
-      const response = await this.delegate.listFaxlines(this.context.userId);
-      const faxlineIds = new Set(
-        items(response)
-          .map((faxline) => stringField(faxline, "id"))
-          .filter((id): id is string => Boolean(id)),
-      );
-      this.assertOwned(faxlineIds, faxlineId, "faxline");
+      this.assertOwned(await this.ownedFaxlineIds(), faxlineId, "faxline");
     } catch (error) {
       if (error instanceof AccessPolicyError) throw error;
       throw new AccessPolicyError(
@@ -815,12 +1257,159 @@ export class AccessControlledBackend implements TelephonyBackend {
   }
 
   private async ownedPhonelineIds(): Promise<Set<string>> {
+    return (await this.ownedPhonelineState()).ids;
+  }
+
+  private async ownedPhonelineState(): Promise<OwnershipState> {
     const phonelinesResponse = await this.delegate.listPhonelines(this.context.userId);
-    return new Set(
-      items(phonelinesResponse)
+    return {
+      available: asObject(phonelinesResponse)?.phonelinesAvailable !== false,
+      ids: new Set(items(phonelinesResponse)
         .map((phoneline) => stringField(phoneline, "id"))
-        .filter((id): id is string => Boolean(id)),
-    );
+        .filter((id): id is string => Boolean(id))),
+    };
+  }
+
+  private async assertOwnedPhoneline(phonelineId: string): Promise<boolean> {
+    try {
+      const owned = await this.ownedPhonelineState();
+      if (!owned.available) return false;
+      this.assertOwned(owned.ids, phonelineId, "phoneline");
+      return true;
+    } catch (error) {
+      if (error instanceof AccessPolicyError) throw error;
+      throw new AccessPolicyError(
+        "User scope could not establish ownership of the requested phoneline.",
+      );
+    }
+  }
+
+  private async assertOwnedParallelForwarding(
+    phonelineId: string,
+    parallelForwardingId: string,
+  ): Promise<boolean> {
+    if (!await this.assertOwnedPhoneline(phonelineId)) return false;
+    try {
+      const response = await this.delegate.listParallelForwardings(
+        this.context.userId,
+        phonelineId,
+      );
+      if (asObject(response)?.phonelinesAvailable === false) return false;
+      const ids = new Set(items(response)
+        .map((forwarding) => stringField(forwarding, "id"))
+        .filter((id): id is string => Boolean(id)));
+      this.assertOwned(ids, parallelForwardingId, "parallel forwarding");
+      return true;
+    } catch (error) {
+      if (error instanceof AccessPolicyError) throw error;
+      throw new AccessPolicyError(
+        "User scope could not establish ownership of the requested parallel forwarding.",
+      );
+    }
+  }
+
+  private async assertOwnedVoicemail(
+    phonelineId: string,
+    voicemailId: string,
+  ): Promise<boolean> {
+    if (!await this.assertOwnedPhoneline(phonelineId)) return false;
+    try {
+      const response = await this.delegate.listPhonelineVoicemails(
+        this.context.userId,
+        phonelineId,
+      );
+      if (asObject(response)?.phonelinesAvailable === false) return false;
+      const ids = new Set(items(response)
+        .map((voicemail) => stringField(voicemail, "id"))
+        .filter((id): id is string => Boolean(id)));
+      this.assertOwned(ids, voicemailId, "voicemail");
+      return true;
+    } catch (error) {
+      if (error instanceof AccessPolicyError) throw error;
+      throw new AccessPolicyError(
+        "User scope could not establish ownership of the requested voicemail.",
+      );
+    }
+  }
+
+  private async ownedVoicemailState(): Promise<OwnershipState> {
+    try {
+      const phonelines = await this.ownedPhonelineState();
+      if (!phonelines.available) return { available: false, ids: new Set() };
+      const responses = await Promise.all([...phonelines.ids].map((phonelineId) =>
+        this.delegate.listPhonelineVoicemails(this.context.userId, phonelineId)));
+      if (responses.some((response) => asObject(response)?.phonelinesAvailable === false)) {
+        return { available: false, ids: new Set() };
+      }
+      return {
+        available: true,
+        ids: new Set(responses.flatMap((response) => items(response)
+          .map((voicemail) => stringField(voicemail, "id"))
+          .filter((id): id is string => Boolean(id)))),
+      };
+    } catch {
+      throw new AccessPolicyError(
+        "User scope could not establish ownership of the requested voicemail.",
+      );
+    }
+  }
+
+  private async assertOwnedVoicemailId(voicemailId: string): Promise<boolean> {
+    const owned = await this.ownedVoicemailState();
+    if (!owned.available) return false;
+    this.assertOwned(owned.ids, voicemailId, "voicemail");
+    return true;
+  }
+
+  private async assertOwnedGreeting(
+    phonelineId: string,
+    voicemailId: string,
+    greetingId: string,
+  ): Promise<boolean> {
+    if (!await this.assertOwnedVoicemail(phonelineId, voicemailId)) return false;
+    try {
+      const response = await this.delegate.listVoicemailGreetings(
+        this.context.userId,
+        phonelineId,
+        voicemailId,
+      );
+      if (asObject(response)?.phonelinesAvailable === false) return false;
+      const ids = new Set(items(response)
+        .map((greeting) => stringField(greeting, "id"))
+        .filter((id): id is string => Boolean(id)));
+      this.assertOwned(ids, greetingId, "voicemail greeting");
+      return true;
+    } catch (error) {
+      if (error instanceof AccessPolicyError) throw error;
+      throw new AccessPolicyError(
+        "User scope could not establish ownership of the requested voicemail greeting.",
+      );
+    }
+  }
+
+  private async ownedFaxlineIds(): Promise<Set<string>> {
+    const response = await this.delegate.listFaxlines(this.context.userId);
+    return new Set(items(response)
+      .map((faxline) => stringField(faxline, "id"))
+      .filter((id): id is string => Boolean(id)));
+  }
+
+  private async assertOwnedAutorecordingExtension(extension: string): Promise<void> {
+    try {
+      const [phonelines, faxlineIds] = await Promise.all([
+        this.ownedPhonelineState(),
+        this.ownedFaxlineIds(),
+      ]);
+      if (phonelines.ids.has(extension) || faxlineIds.has(extension)) return;
+      throw new AccessPolicyError(
+        "User scope does not permit access to the requested automated-recording extension.",
+      );
+    } catch (error) {
+      if (error instanceof AccessPolicyError) throw error;
+      throw new AccessPolicyError(
+        "User scope could not establish ownership of the requested automated-recording extension.",
+      );
+    }
   }
 
   private async ownedDeviceIds(): Promise<Set<string>> {

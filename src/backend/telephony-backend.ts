@@ -150,6 +150,39 @@ export interface ResendFaxInput {
   faxlineId?: string;
 }
 
+export interface BlockAnonymousInput {
+  enabled?: boolean;
+  target?: "REJECT" | "VOICEMAIL";
+}
+
+export interface ParallelForwardingInput {
+  active?: boolean;
+  alias?: string;
+  destination?: string;
+}
+
+export interface VoicemailSettingsInput {
+  active: boolean;
+  transcription: boolean;
+  timeout?: number;
+}
+
+export interface GreetingUploadInput {
+  base64Content?: string;
+  filename?: string;
+}
+
+export interface VoicemailPlaybackInput {
+  dataId?: string;
+  deviceId?: string;
+}
+
+export interface VoicemailRecordingInput {
+  deviceId?: string;
+  endpoint?: string;
+  targetId?: string;
+}
+
 export interface TelephonyBackend {
   getAuthenticatedUser(): Promise<AuthenticatedUserContext>;
   getUser(userId: string): Promise<JsonValue>;
@@ -159,6 +192,20 @@ export interface TelephonyBackend {
   listUserNumbers(userId: string, pagination: PaginationInput): Promise<JsonValue>;
   getUserNumbers(userId: string): Promise<JsonValue>;
   listPhonelines(userId: string): Promise<JsonValue>;
+  getPhoneline(userId: string, phonelineId: string): Promise<JsonValue>;
+  getPhonelineBlockAnonymous(userId: string, phonelineId: string): Promise<JsonValue>;
+  listPhonelineDevices(userId: string, phonelineId: string): Promise<JsonValue>;
+  listParallelForwardings(userId: string, phonelineId: string): Promise<JsonValue>;
+  listPhonelineVoicemails(userId: string, phonelineId: string): Promise<JsonValue>;
+  listVoicemailGreetings(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+  ): Promise<JsonValue>;
+  listVoicemails(): Promise<JsonValue>;
+  getVoicemail(voicemailId: string): Promise<JsonValue>;
+  listAutorecordingGreetings(): Promise<JsonValue>;
+  getAutorecordingSettings(extension: string): Promise<JsonValue>;
   listDevices(userId?: string, types?: DeviceType[]): Promise<JsonValue>;
   getDevice(deviceId: string): Promise<JsonValue>;
   getDeviceCallerId(deviceId: string): Promise<JsonValue>;
@@ -177,6 +224,7 @@ export interface TelephonyBackend {
   listNotifications(userId: string): Promise<JsonValue>;
   listFaxlines(userId: string): Promise<JsonValue>;
   listFaxlineNumbers(userId: string, faxlineId: string): Promise<JsonValue>;
+  getFaxlineCallerId(userId: string, faxlineId: string): Promise<JsonValue>;
   getSettings(userId?: string): Promise<JsonValue>;
   setNumberRouting(numberId: string, endpointId: string): Promise<MutationResult>;
   setUserNumberRouting(
@@ -189,6 +237,85 @@ export interface TelephonyBackend {
     phonelineId: string,
     forwardings: ForwardingRule[],
   ): Promise<MutationResult>;
+  createPhoneline(userId: string): Promise<MutationResult>;
+  updatePhonelineAlias(
+    userId: string,
+    phonelineId: string,
+    alias?: string,
+  ): Promise<MutationResult>;
+  deletePhoneline(userId: string, phonelineId: string): Promise<MutationResult>;
+  setPhonelineBlockAnonymous(
+    userId: string,
+    phonelineId: string,
+    input: BlockAnonymousInput,
+  ): Promise<MutationResult>;
+  attachDeviceToPhoneline(
+    userId: string,
+    phonelineId: string,
+    deviceId: string,
+  ): Promise<MutationResult>;
+  detachDeviceFromPhoneline(
+    userId: string,
+    phonelineId: string,
+    deviceId: string,
+  ): Promise<MutationResult>;
+  createParallelForwarding(
+    userId: string,
+    phonelineId: string,
+    input: ParallelForwardingInput,
+  ): Promise<MutationResult>;
+  updateParallelForwarding(
+    userId: string,
+    phonelineId: string,
+    parallelForwardingId: string,
+    input: ParallelForwardingInput,
+  ): Promise<MutationResult>;
+  deleteParallelForwarding(
+    userId: string,
+    phonelineId: string,
+    parallelForwardingId: string,
+  ): Promise<MutationResult>;
+  updateVoicemail(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    input: VoicemailSettingsInput,
+  ): Promise<MutationResult>;
+  createVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    input: GreetingUploadInput,
+  ): Promise<MutationResult>;
+  updateVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    greetingId: string,
+    active?: boolean,
+  ): Promise<MutationResult>;
+  deleteVoicemailGreeting(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    greetingId: string,
+  ): Promise<MutationResult>;
+  setVoicemailTranscription(
+    userId: string,
+    phonelineId: string,
+    voicemailId: string,
+    active?: boolean,
+  ): Promise<MutationResult>;
+  playVoicemail(input: VoicemailPlaybackInput): Promise<MutationResult>;
+  recordVoicemailGreeting(input: VoicemailRecordingInput): Promise<MutationResult>;
+  createAutorecordingGreeting(input: GreetingUploadInput): Promise<MutationResult>;
+  deleteAutorecordingGreeting(greetingId: string): Promise<MutationResult>;
+  setAutorecordingSettings(extension: string, active?: boolean): Promise<MutationResult>;
+  createFaxline(userId: string): Promise<MutationResult>;
+  updateFaxlineAlias(userId: string, faxlineId: string, alias?: string): Promise<MutationResult>;
+  deleteFaxline(userId: string, faxlineId: string): Promise<MutationResult>;
+  setFaxlineCallerId(userId: string, faxlineId: string, value?: string): Promise<MutationResult>;
+  setFaxlineTagline(userId: string, faxlineId: string, value?: string): Promise<MutationResult>;
   setDnd(deviceId: string, enabled: boolean): Promise<MutationResult>;
   updateDevice(deviceId: string, settings: DeviceSettingsInput): Promise<MutationResult>;
   deleteDevice(deviceId: string): Promise<MutationResult>;
