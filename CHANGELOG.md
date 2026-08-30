@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1 - 2026-08-30
+
+- List user numbers from sipgate's own user-number endpoint instead of matching
+  account numbers against device endpoints. Numbers that are assigned to a user
+  but routed nowhere carry an empty `endpointId`, so the endpoint match dropped
+  them and `list_numbers` came back empty on a real account.
+- Name the denied endpoint in HTTP 403 errors. One denied endpoint no longer
+  reads as a blanket token or account problem when the rest of the API works.
+
 ## 0.5.0 - 2026-08-30
 - Add the final 32 tools for contacts, incoming blocklists, call/product
   restrictions, history updates/deletes/CSV export, balance, portings,

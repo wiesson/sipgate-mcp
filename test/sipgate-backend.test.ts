@@ -273,6 +273,7 @@ function backendWithStatuses(responses: StubResponse[]): {
 test("SipgateBackend serves user numbers from devices when phonelines are unavailable", async () => {
   const { backend, requests } = backendWithStatuses([
     { status: 403 },
+    { body: { items: [] } },
     { body: { items: [{ id: "e0", alias: "VoIP" }] } },
     {
       body: {
@@ -298,6 +299,7 @@ test("SipgateBackend serves user numbers from devices when phonelines are unavai
   });
   assert.deepEqual(requests.map((request) => new URL(request.url).pathname), [
     "/v2/w0/phonelines",
+    "/v2/w0/numbers",
     "/v2/w0/devices",
     "/v2/numbers",
   ]);
@@ -364,6 +366,7 @@ test("SipgateBackend falls back to device numbers for routing without phonelines
   const { backend } = backendWithStatuses([
     { status: 403 },
     { status: 403 },
+    { body: { items: [] } },
     { body: { items: [{ id: "e0" }] } },
     { body: { items: [{ id: "n0", number: "+49211123456", endpointId: "e0" }] } },
   ]);
@@ -380,6 +383,7 @@ test("SipgateBackend falls back to device numbers for routing without phonelines
 test("SipgateBackend surfaces a denied numbers endpoint instead of returning nothing", async () => {
   const { backend } = backendWithStatuses([
     { status: 403 },
+    { body: { items: [] } },
     { body: { items: [{ id: "e0" }] } },
     { status: 403 },
   ]);
@@ -395,6 +399,7 @@ test("SipgateBackend reads every page of account numbers for the device fallback
   }));
   const { backend, requests } = backendWithStatuses([
     { status: 403 },
+    { body: { items: [] } },
     { body: { items: [{ id: "e0" }] } },
     { body: { items: firstPage, totalCount: 1001 } },
     { body: { items: [{ id: "n1000", number: "+49211001000", endpointId: "e0" }], totalCount: 1001 } },
@@ -1788,4 +1793,30 @@ test("SipgateBackend strips credentials from webhook log URLs", async () => {
 
   assert.equal(result.items[0]?.url, "https://hooks.example.com/sipgate?[REDACTED]");
   assert.equal(result.items[0]?.response, "ok");
+});
+
+test("SipgateBackend lists user numbers that are assigned but routed nowhere", async () => {
+  const { backend, requests } = backendWithStatuses([
+    { status: 403 },
+    {
+      body: {
+        items: [
+          { id: "50113387", number: "+4921187973989579", endpointId: "" },
+          { id: "50113388", number: "+4921187973989578", endpointId: "" },
+        ],
+      },
+    },
+  ]);
+
+  const result = await backend.listUserNumbers("w0", { offset: 0, limit: 50 }) as {
+    items: JsonValue[];
+    source: string;
+  };
+
+  assert.equal(result.items.length, 2);
+  assert.equal(result.source, "user-numbers");
+  assert.deepEqual(requests.map((request) => new URL(request.url).pathname), [
+    "/v2/w0/phonelines",
+    "/v2/w0/numbers",
+  ]);
 });

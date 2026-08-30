@@ -28,7 +28,7 @@ export class SipgateApiError extends Error {
   }
 }
 
-function errorForStatus(status: number, retryAfter: string | null): SipgateApiError {
+function errorForStatus(status: number, retryAfter: string | null, path: string): SipgateApiError {
   switch (status) {
     case 401:
       return new SipgateApiError(
@@ -37,7 +37,7 @@ function errorForStatus(status: number, retryAfter: string | null): SipgateApiEr
       );
     case 403:
       return new SipgateApiError(
-        "sipgate denied this operation (HTTP 403). The Personal Access Token may be missing a required PAT scope or the account may not include this feature.",
+        `sipgate denied ${path} (HTTP 403). The Personal Access Token may be missing a required PAT scope for it, or the account may not include this feature. Other endpoints can still work, so check the token's scopes for this one specifically.`,
         status,
       );
     case 404:
@@ -118,7 +118,9 @@ export class SipgateClient {
       throw new SipgateApiError("Could not reach the sipgate API. Check the network connection and try again.");
     }
 
-    if (!response.ok) throw errorForStatus(response.status, response.headers.get("retry-after"));
+    if (!response.ok) {
+      throw errorForStatus(response.status, response.headers.get("retry-after"), url.pathname);
+    }
     return response;
   }
 }
