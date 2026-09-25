@@ -250,8 +250,15 @@ export class SipgateClient {
     if (options.body !== undefined) headers["Content-Type"] = "application/json";
 
     for (let attempt = 0; ; attempt += 1) {
-      // One signal per attempt bounds the headers and the body read together.
-      const signal = AbortSignal.timeout(this.#timeoutMs);
+      // One deadline per attempt bounds the headers and the body read together.
+      // AbortSignal.timeout() is not used: its timer is unref'd, so on Node 22
+      // it never fires while nothing else keeps the event loop alive.
+      const controller = new AbortController();
+      const { signal } = controller;
+      const deadline = setTimeout(
+        () => controller.abort(new DOMException("The sipgate request timed out.", "TimeoutError")),
+        this.#timeoutMs,
+      );
       try {
         const response = await this.#fetch(url, {
           method,
@@ -298,6 +305,8 @@ export class SipgateClient {
         throw this.#error(
           `Could not reach the sipgate API.${outcome || " Check the network connection and try again."}`,
         );
+      } finally {
+        clearTimeout(deadline);
       }
     }
   }
