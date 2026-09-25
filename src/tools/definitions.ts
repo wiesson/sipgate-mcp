@@ -118,6 +118,7 @@ const historyDirections = z.array(
 ).min(1).optional();
 const historyStarred = z.array(z.enum(["STARRED", "UNSTARRED"])).min(1).optional();
 const callRestriction = id.describe("Call restriction name, for example roaming");
+const phonelineId = id.describe("Phoneline ID returned by list_phonelines, for example p0");
 
 function define<T extends z.ZodType<Record<string, unknown>>>(options: {
   name: string;
@@ -139,8 +140,23 @@ export function createToolDefinitions(
   backend: TelephonyBackend,
   readonly = false,
   accessScope: AccessScope = "user",
+  authenticatedUserId?: string,
 ): ToolDefinition[] {
   const userScoped = accessScope === "user";
+  /**
+   * In user scope the authenticated user is the only permitted value, so the
+   * ID defaults to it before anything is delegated. An explicit foreign ID is
+   * passed on unchanged for the access layer to reject; account scope keeps
+   * the ID required.
+   */
+  const userIdField = (accountDescription: string) => {
+    if (!userScoped) return id.describe(accountDescription);
+    if (authenticatedUserId === undefined) {
+      return id.describe("Authenticated sipgate user ID; another user's ID is rejected");
+    }
+    return id.default(authenticatedUserId)
+      .describe("Optional; defaults to the authenticated sipgate user. Another user's ID is rejected");
+  };
   const changeWarning = userScoped
     ? "CHANGES THE AUTHENTICATED USER'S SIPGATE ACCOUNT AND MAY INCUR CHARGES:"
     : "CHANGES THE SIPGATE ACCOUNT AND MAY INCUR CHARGES:";
@@ -216,14 +232,14 @@ export function createToolDefinitions(
       execute: async ({ device_id }) => backend.getDeviceLocalPrefix(device_id),
     }),
     define({
-      name: "get_device_tariff_announcement",
+      name: "get_tariff_announcement",
       description: "Get the tariff-announcement setting for one owned sipgate device.",
       schema: z.object({ device_id: id.describe("Device ID returned by list_devices") }),
       annotations: readAnnotations,
       execute: async ({ device_id }) => backend.getDeviceTariffAnnouncement(device_id),
     }),
     define({
-      name: "get_device_single_row_display",
+      name: "get_single_row_display",
       description: "Get the single-row display setting for one owned sipgate device.",
       schema: z.object({ device_id: id.describe("Device ID returned by list_devices") }),
       annotations: readAnnotations,
@@ -233,9 +249,7 @@ export function createToolDefinitions(
       name: "get_device_contingents",
       description: "List the booked and remaining contingents for one owned sipgate device.",
       schema: z.object({
-        user_id: id.describe(userScoped
-          ? "Authenticated sipgate user ID; another user's ID is rejected"
-          : "Owner user ID, for example w0"),
+        user_id: userIdField("Owner user ID, for example w0"),
         device_id: id.describe("Device ID returned by list_devices"),
       }),
       annotations: readAnnotations,
@@ -245,9 +259,7 @@ export function createToolDefinitions(
       name: "list_user_numbers",
       description: "List phone numbers from sipgate's documented user-specific numbers endpoint without using phonelines.",
       schema: z.object({
-        user_id: id.describe(userScoped
-          ? "Authenticated sipgate user ID; another user's ID is rejected"
-          : "sipgate user ID, for example w0"),
+        user_id: userIdField("sipgate user ID, for example w0"),
       }),
       annotations: readAnnotations,
       execute: async ({ user_id }) => backend.getUserNumbers(user_id),
@@ -336,11 +348,9 @@ export function createToolDefinitions(
     }),
     define({
       name: "list_notifications",
-      description: "List call, fax, SMS, and voicemail notifications for one sipgate user.",
+      description: "List the call, fax, SMS, and voicemail notifications (email/SMS alerts created by the create_*_alert tools) of one sipgate user, including the notification IDs that delete_notification needs.",
       schema: z.object({
-        user_id: id.describe(userScoped
-          ? "Authenticated sipgate user ID; another user's ID is rejected"
-          : "sipgate user ID, for example w0"),
+        user_id: userIdField("sipgate user ID, for example w0"),
       }),
       annotations: readAnnotations,
       execute: async ({ user_id }) => backend.listNotifications(user_id),
@@ -349,20 +359,16 @@ export function createToolDefinitions(
       name: "list_faxlines",
       description: "List faxlines belonging to one sipgate user, including send/receive capability.",
       schema: z.object({
-        user_id: id.describe(userScoped
-          ? "Authenticated sipgate user ID; another user's ID is rejected"
-          : "sipgate user ID, for example w0"),
+        user_id: userIdField("sipgate user ID, for example w0"),
       }),
       annotations: readAnnotations,
       execute: async ({ user_id }) => backend.listFaxlines(user_id),
     }),
     define({
       name: "list_faxline_numbers",
-      description: "List phone numbers routed to an owned faxline.",
+      description: "List the phone numbers routed to one owned faxline, so senders know which number reaches it. Get faxline_id from list_faxlines.",
       schema: z.object({
-        user_id: id.describe(userScoped
-          ? "Authenticated sipgate user ID; another user's ID is rejected"
-          : "Faxline owner user ID, for example w0"),
+        user_id: userIdField("Faxline owner user ID, for example w0"),
         faxline_id: id.describe("Faxline ID returned by list_faxlines"),
       }),
       annotations: readAnnotations,
@@ -370,21 +376,30 @@ export function createToolDefinitions(
         backend.listFaxlineNumbers(user_id, faxline_id),
     }),
     define({
+      name: "list_phonelines",
+      description: "List the phonelines (extensions with numbers, forwardings, and voicemail) of one sipgate user, with the phoneline IDs that the other phoneline tools need. Accounts without a phoneline layer return an empty list with phonelinesAvailable: false.",
+      schema: z.object({
+        user_id: userIdField("sipgate user ID, for example w0"),
+      }),
+      annotations: readAnnotations,
+      execute: async ({ user_id }) => backend.listPhonelines(user_id),
+    }),
+    define({
       name: "get_phoneline",
       description: "Get one owned phoneline. Accounts without a phoneline layer return a clean unavailable result.",
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id.describe("Phoneline ID returned by get_routing or get_settings"),
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
       }),
       annotations: readAnnotations,
       execute: async ({ user_id, phoneline_id }) => backend.getPhoneline(user_id, phoneline_id),
     }),
     define({
-      name: "get_phoneline_block_anonymous",
+      name: "get_anonymous_call_blocking",
       description: "Get anonymous-caller blocking for one owned phoneline, or report that phonelines are unavailable.",
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
       }),
       annotations: readAnnotations,
       execute: async ({ user_id, phoneline_id }) =>
@@ -394,8 +409,8 @@ export function createToolDefinitions(
       name: "list_phoneline_devices",
       description: "List owned devices attached to one owned phoneline, or report that phonelines are unavailable.",
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
       }),
       annotations: readAnnotations,
       execute: async ({ user_id, phoneline_id }) =>
@@ -405,8 +420,8 @@ export function createToolDefinitions(
       name: "list_parallel_forwardings",
       description: "List parallel forwardings of one owned phoneline, or report that the feature is unavailable.",
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
       }),
       annotations: readAnnotations,
       execute: async ({ user_id, phoneline_id }) =>
@@ -416,8 +431,8 @@ export function createToolDefinitions(
       name: "list_phoneline_voicemails",
       description: "List voicemail extensions belonging to one owned phoneline, or report that the feature is unavailable.",
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
       }),
       annotations: readAnnotations,
       execute: async ({ user_id, phoneline_id }) =>
@@ -427,8 +442,8 @@ export function createToolDefinitions(
       name: "list_voicemail_greetings",
       description: "List greetings belonging to an owned voicemail on an owned phoneline.",
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
         voicemail_id: id,
       }),
       annotations: readAnnotations,
@@ -467,9 +482,9 @@ export function createToolDefinitions(
     }),
     define({
       name: "get_faxline_caller_id",
-      description: "Get the caller ID configured for one owned faxline.",
+      description: "Get the outgoing caller ID (sender number) that one owned faxline shows to fax recipients. Get faxline_id from list_faxlines.",
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         faxline_id: id.describe("Faxline ID returned by list_faxlines"),
       }),
       annotations: readAnnotations,
@@ -577,7 +592,7 @@ export function createToolDefinitions(
       name: "list_restrictions",
       description: "List product/action restrictions for one sipgate user. User scope only permits the authenticated user ID.",
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "sipgate user ID"),
+        user_id: userIdField("sipgate user ID"),
         restrictions: z.array(swaggerString).min(1).optional(),
       }),
       annotations: readAnnotations,
@@ -593,7 +608,7 @@ export function createToolDefinitions(
         types: historyTypes,
         directions: historyDirections,
         offset: z.int().min(0).default(0),
-        limit: z.int().min(0).max(1000).default(1000),
+        limit: z.int().min(1).max(1000).default(1000),
         archived: z.boolean().optional(),
         starred: historyStarred,
         from: isoDateTime.optional(),
@@ -877,10 +892,8 @@ export function createToolDefinitions(
       name: "set_forwarding",
       description: `${changeWarning} replace all forwardings for a phoneline, including timeout routing. Pass [] to delete all forwardings. Returns before/after state.`,
       schema: z.object({
-        user_id: id.describe(userScoped
-          ? "Authenticated sipgate user ID; another user's ID is rejected"
-          : "Owner user ID, for example w0"),
-        phoneline_id: id.describe("Phoneline ID, for example p0"),
+        user_id: userIdField("Owner user ID, for example w0"),
+        phoneline_id: phonelineId,
         forwardings: z.array(z.object({
           active: z.boolean().default(true),
           destination: e164,
@@ -895,7 +908,7 @@ export function createToolDefinitions(
       name: "create_phoneline",
       description: `${changeWarning} create a phoneline for the authenticated user. Provisioning may affect billing; returns before: null and the initial state, or a clean unavailable result.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
       }),
       annotations: actionAnnotations,
       execute: async ({ user_id }) => backend.createPhoneline(user_id),
@@ -904,8 +917,8 @@ export function createToolDefinitions(
       name: "update_phoneline_alias",
       description: `${changeWarning} update an owned phoneline alias. Returns before/after state or a clean unavailable result.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
         alias: swaggerString.optional(),
       }),
       annotations: writeAnnotations,
@@ -916,18 +929,18 @@ export function createToolDefinitions(
       name: "delete_phoneline",
       description: `${changeWarning} permanently delete an owned phoneline. Returns its previous state and a deletion marker, or a clean unavailable result.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
       }),
       annotations: writeAnnotations,
       execute: async ({ user_id, phoneline_id }) => backend.deletePhoneline(user_id, phoneline_id),
     }),
     define({
-      name: "set_phoneline_block_anonymous",
+      name: "set_anonymous_call_blocking",
       description: `${changeWarning} configure anonymous-caller rejection or voicemail routing on an owned phoneline. Returns before/after state.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
         enabled: z.boolean().optional(),
         target: z.enum(["REJECT", "VOICEMAIL"]).optional(),
       }),
@@ -942,8 +955,8 @@ export function createToolDefinitions(
       name: "attach_device_to_phoneline",
       description: `${changeWarning} attach an owned device to an owned phoneline. Returns the complete before/after device assignment.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
         device_id: id.describe("Owned device ID returned by list_devices"),
       }),
       annotations: actionAnnotations,
@@ -954,8 +967,8 @@ export function createToolDefinitions(
       name: "detach_device_from_phoneline",
       description: `${changeWarning} detach an owned device from an owned phoneline. Returns the complete before/after device assignment.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
         device_id: id.describe("Owned device ID returned by list_phoneline_devices"),
       }),
       annotations: writeAnnotations,
@@ -966,8 +979,8 @@ export function createToolDefinitions(
       name: "create_parallel_forwarding",
       description: `${changeWarning} create a parallel forwarding on an owned phoneline. Returns the complete before/after forwarding list.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
         active: z.boolean().optional(),
         alias: swaggerString.optional(),
         destination: swaggerString.optional(),
@@ -984,8 +997,8 @@ export function createToolDefinitions(
       name: "update_parallel_forwarding",
       description: `${changeWarning} update a parallel forwarding belonging to an owned phoneline. Returns the complete before/after forwarding list.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
         parallel_forwarding_id: id,
         active: z.boolean().optional(),
         alias: swaggerString.optional(),
@@ -1014,8 +1027,8 @@ export function createToolDefinitions(
       name: "delete_parallel_forwarding",
       description: `${changeWarning} delete a parallel forwarding belonging to an owned phoneline. Returns the complete before/after forwarding list.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
         parallel_forwarding_id: id,
       }),
       annotations: writeAnnotations,
@@ -1026,8 +1039,8 @@ export function createToolDefinitions(
       name: "update_voicemail",
       description: `${changeWarning} update an owned phoneline voicemail's active, timeout, and transcription settings. Returns before/after voicemail lists.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
         voicemail_id: id,
         active: z.boolean(),
         transcription: z.boolean(),
@@ -1045,8 +1058,8 @@ export function createToolDefinitions(
       name: "create_voicemail_greeting",
       description: `${changeWarning} upload a greeting for an owned phoneline voicemail. Returns the complete before/after greeting list.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
         voicemail_id: id,
         base64_content: z.string().max(15_000_000).optional(),
         filename: swaggerString.optional(),
@@ -1062,8 +1075,8 @@ export function createToolDefinitions(
       name: "update_voicemail_greeting",
       description: `${changeWarning} activate or deactivate a greeting belonging to an owned phoneline voicemail. Returns the complete before/after greeting list.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
         voicemail_id: id,
         greeting_id: id,
         active: z.boolean().optional(),
@@ -1082,8 +1095,8 @@ export function createToolDefinitions(
       name: "delete_voicemail_greeting",
       description: `${changeWarning} delete a greeting belonging to an owned phoneline voicemail. Returns the complete before/after greeting list.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
         voicemail_id: id,
         greeting_id: id,
       }),
@@ -1095,8 +1108,8 @@ export function createToolDefinitions(
       name: "set_voicemail_transcription",
       description: `${changeWarning} enable or disable transcription for an owned phoneline voicemail. Transcription availability and pricing depend on the account. Returns before/after voicemail lists.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
-        phoneline_id: id,
+        user_id: userIdField("Owner user ID"),
+        phoneline_id: phonelineId,
         voicemail_id: id,
         active: z.boolean().optional(),
       }),
@@ -1133,7 +1146,7 @@ export function createToolDefinitions(
       }),
     }),
     define({
-      name: "create_autorecording_greeting",
+      name: "create_recording_greeting",
       description: `${changeWarning} replace the account-wide automated call-recording announcement. This resource has no user ownership link and therefore requires administrator account scope. Call recording may incur charges; the caller is responsible for obtaining every participant's consent. Returns before/after greeting state.`,
       schema: z.object({
         base64_content: z.string().max(15_000_000).optional(),
@@ -1146,7 +1159,7 @@ export function createToolDefinitions(
       }),
     }),
     define({
-      name: "delete_autorecording_greeting",
+      name: "delete_recording_greeting",
       description: `${changeWarning} delete the account-wide automated call-recording announcement. This resource has no user ownership link and therefore requires administrator account scope. Call recording may incur charges; the caller is responsible for obtaining every participant's consent. Returns previous state and a deletion marker.`,
       schema: z.object({ greeting_id: id }),
       annotations: writeAnnotations,
@@ -1166,7 +1179,7 @@ export function createToolDefinitions(
       name: "create_faxline",
       description: `${changeWarning} create a faxline for the authenticated user. Provisioning may affect billing; returns before: null and the initial state.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
       }),
       annotations: actionAnnotations,
       execute: async ({ user_id }) => backend.createFaxline(user_id),
@@ -1175,7 +1188,7 @@ export function createToolDefinitions(
       name: "update_faxline_alias",
       description: `${changeWarning} update the alias of an owned faxline. Returns before/after faxline state.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         faxline_id: id,
         alias: swaggerString.optional(),
       }),
@@ -1187,7 +1200,7 @@ export function createToolDefinitions(
       name: "delete_faxline",
       description: `${changeWarning} permanently delete an owned faxline. Returns its previous state and a deletion marker.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         faxline_id: id,
       }),
       annotations: writeAnnotations,
@@ -1197,7 +1210,7 @@ export function createToolDefinitions(
       name: "set_faxline_caller_id",
       description: `${changeWarning} set an owned faxline's caller ID to an owned phone number. Returns before/after caller-ID state.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         faxline_id: id,
         value: swaggerString.optional(),
       }),
@@ -1209,7 +1222,7 @@ export function createToolDefinitions(
       name: "set_faxline_tagline",
       description: `${changeWarning} update the tagline of an owned faxline. Returns before/after faxline state.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         faxline_id: id,
         value: swaggerString.optional(),
       }),
@@ -1283,7 +1296,7 @@ export function createToolDefinitions(
       }),
     }),
     define({
-      name: "set_device_tariff_announcement",
+      name: "set_tariff_announcement",
       description: `${changeWarning} update the tariff-announcement setting for an owned device. Returns before/after state.`,
       schema: z.object({
         device_id: id.describe("Device ID returned by list_devices"),
@@ -1293,7 +1306,7 @@ export function createToolDefinitions(
       execute: async ({ device_id, enabled }) => backend.setDeviceTariffAnnouncement(device_id, enabled),
     }),
     define({
-      name: "set_device_single_row_display",
+      name: "set_single_row_display",
       description: `${changeWarning} update the single-row display setting for an owned device. Returns before/after state.`,
       schema: z.object({
         device_id: id.describe("Device ID returned by list_devices"),
@@ -1303,7 +1316,7 @@ export function createToolDefinitions(
       execute: async ({ device_id, enabled }) => backend.setDeviceSingleRowDisplay(device_id, enabled),
     }),
     define({
-      name: "set_external_device_target_number",
+      name: "set_external_device_target",
       description: `${changeWarning} update the target phone number of an owned external device. Returns before/after device state.`,
       schema: z.object({
         device_id: id.describe("External device ID returned by list_devices"),
@@ -1313,8 +1326,8 @@ export function createToolDefinitions(
       execute: async ({ device_id, number }) => backend.setExternalDeviceTargetNumber(device_id, number),
     }),
     define({
-      name: "set_external_device_incoming_call_display",
-      description: `${changeWarning} choose whether an owned external device sees the called or caller number. Returns before/after device state.`,
+      name: "set_external_device_display",
+      description: `${changeWarning} choose whether an owned external device (a forwarding target such as a mobile phone) displays the called sipgate number or the caller's number for incoming calls. Returns before/after device state.`,
       schema: z.object({
         device_id: id.describe("External device ID returned by list_devices"),
         incoming_call_display: z.enum(["CALLED_NUMBER", "CALLER_NUMBER"]),
@@ -1334,7 +1347,7 @@ export function createToolDefinitions(
       name: "create_register_device",
       description: `${changeWarning} create a SIP register device; device creation may affect billing. Returns the sanitized initial device state.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         alias: swaggerString.optional(),
       }),
       annotations: actionAnnotations,
@@ -1344,7 +1357,7 @@ export function createToolDefinitions(
       name: "create_mobile_device",
       description: `${changeWarning} create a mobile device; device or SIM provisioning may affect billing. Returns the sanitized initial device state.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         alias: swaggerString.optional(),
       }),
       annotations: actionAnnotations,
@@ -1354,7 +1367,7 @@ export function createToolDefinitions(
       name: "create_external_device",
       description: `${changeWarning} create an external device; device provisioning or calls may affect billing. Returns the sanitized initial device state.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         alias: swaggerString.optional(),
         number: swaggerString.optional().describe("External target phone number"),
       }),
@@ -1365,7 +1378,7 @@ export function createToolDefinitions(
       name: "create_quick_dial",
       description: `${changeWarning} create a quick-dial number for a sipgate user. The API has no documented read-back response.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         number: swaggerString.optional().describe("Quick-dial number"),
       }),
       annotations: actionAnnotations,
@@ -1379,7 +1392,7 @@ export function createToolDefinitions(
       description: `${changeWarning} update an owned quick-dial number and its assigned user. Returns before/after state.`,
       schema: z.object({
         quick_dial_id: id.describe("Quick-dial ID returned by list_user_numbers or list_numbers"),
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         number: swaggerString.optional().describe("Quick-dial number"),
       }),
       annotations: writeAnnotations,
@@ -1435,9 +1448,7 @@ export function createToolDefinitions(
       name: "send_sms",
       description: `${changeWarning} send an SMS after verifying an SMS-capable extension. Returns a before/after history snapshot; history can update asynchronously.`,
       schema: z.object({
-        user_id: id.describe(userScoped
-          ? "Authenticated sipgate user ID; another user's ID is rejected"
-          : "Owner of the SMS extension"),
+        user_id: userIdField("Owner of the SMS extension"),
         sms_id: id.optional().describe("SMS extension ID; the first available extension is used when omitted"),
         recipient: e164,
         message: z.string().min(1),
@@ -1470,10 +1481,10 @@ export function createToolDefinitions(
       }),
     }),
     define({
-      name: "create_call_email_notification",
-      description: `${changeWarning} create an email notification for calls on an owned endpoint. Returns the complete before/after notification state.`,
+      name: "create_call_email_alert",
+      description: `${changeWarning} create an email notification for calls on an owned endpoint. Returns the complete before/after notification state. It then appears in list_notifications and can be removed with delete_notification.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         endpoint_id: id.describe("Owned device or phoneline ID"),
         cause: z.enum(["MISSED", "SUCCESSFUL"]),
         direction: z.enum(["INCOMING", "OUTGOING"]),
@@ -1490,10 +1501,10 @@ export function createToolDefinitions(
         }),
     }),
     define({
-      name: "create_call_sms_notification",
-      description: `${changeWarning} create an SMS notification for calls on an owned endpoint. Returns the complete before/after notification state.`,
+      name: "create_call_sms_alert",
+      description: `${changeWarning} create an SMS notification for calls on an owned endpoint. Returns the complete before/after notification state. It then appears in list_notifications and can be removed with delete_notification.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         endpoint_id: id.describe("Owned device or phoneline ID"),
         cause: z.enum(["MISSED", "SUCCESSFUL"]),
         direction: z.enum(["INCOMING", "OUTGOING"]),
@@ -1510,10 +1521,10 @@ export function createToolDefinitions(
         }),
     }),
     define({
-      name: "create_fax_email_notification",
-      description: `${changeWarning} create an email notification for incoming or outgoing faxes on an owned faxline. Returns before/after notification state.`,
+      name: "create_fax_email_alert",
+      description: `${changeWarning} create an email notification for incoming or outgoing faxes on an owned faxline. Returns before/after notification state. It then appears in list_notifications and can be removed with delete_notification.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         faxline_id: id.describe("Faxline ID returned by list_faxlines"),
         direction: z.enum(["INCOMING", "OUTGOING"]),
         email: swaggerString,
@@ -1528,10 +1539,10 @@ export function createToolDefinitions(
         }),
     }),
     define({
-      name: "create_fax_sms_notification",
-      description: `${changeWarning} create an SMS notification for incoming or outgoing faxes on an owned faxline. Returns before/after notification state.`,
+      name: "create_fax_sms_alert",
+      description: `${changeWarning} create an SMS notification for incoming or outgoing faxes on an owned faxline. Returns before/after notification state. It then appears in list_notifications and can be removed with delete_notification.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         faxline_id: id.describe("Faxline ID returned by list_faxlines"),
         direction: z.enum(["INCOMING", "OUTGOING"]),
         number: e164,
@@ -1546,10 +1557,10 @@ export function createToolDefinitions(
         }),
     }),
     define({
-      name: "create_fax_report_notification",
-      description: `${changeWarning} create an email delivery-report notification for an owned faxline. Returns before/after notification state.`,
+      name: "create_fax_report_alert",
+      description: `${changeWarning} create an email delivery-report notification for an owned faxline. Returns before/after notification state. It then appears in list_notifications and can be removed with delete_notification.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         faxline_id: id.describe("Faxline ID returned by list_faxlines"),
         email: swaggerString,
       }),
@@ -1562,10 +1573,10 @@ export function createToolDefinitions(
         }),
     }),
     define({
-      name: "create_sms_email_notification",
-      description: `${changeWarning} create an email notification for incoming SMS on a user SMS endpoint. Returns before/after notification state.`,
+      name: "create_sms_email_alert",
+      description: `${changeWarning} create an email notification for incoming SMS on a user SMS endpoint. Returns before/after notification state. It then appears in list_notifications and can be removed with delete_notification.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         endpoint_id: id.describe("SMS endpoint ID, for example y0"),
         email: swaggerString,
       }),
@@ -1578,10 +1589,10 @@ export function createToolDefinitions(
         }),
     }),
     define({
-      name: "create_voicemail_email_notification",
-      description: `${changeWarning} create an email notification for a user voicemail. Returns before/after notification state.`,
+      name: "create_voicemail_email_alert",
+      description: `${changeWarning} create an email notification for a user voicemail. Returns before/after notification state. It then appears in list_notifications and can be removed with delete_notification.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         voicemail_id: id.describe("Voicemail ID, for example v0"),
         email: swaggerString,
       }),
@@ -1594,10 +1605,10 @@ export function createToolDefinitions(
         }),
     }),
     define({
-      name: "create_voicemail_sms_notification",
-      description: `${changeWarning} create an SMS notification for a user voicemail. Returns before/after notification state.`,
+      name: "create_voicemail_sms_alert",
+      description: `${changeWarning} create an SMS notification for a user voicemail. Returns before/after notification state. It then appears in list_notifications and can be removed with delete_notification.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         voicemail_id: id.describe("Voicemail ID, for example v0"),
         number: e164,
       }),
@@ -1613,7 +1624,7 @@ export function createToolDefinitions(
       name: "delete_notification",
       description: `${changeWarning} delete a notification after verifying that its nested notification ID belongs to the selected user. Returns before/after notification state.`,
       schema: z.object({
-        user_id: id.describe(userScoped ? "Authenticated sipgate user ID" : "Owner user ID"),
+        user_id: userIdField("Owner user ID"),
         notification_id: id.describe("Notification target ID returned by list_notifications"),
       }),
       annotations: writeAnnotations,

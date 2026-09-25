@@ -2,7 +2,7 @@
 name: sipgate-mcp
 description: Install and securely configure the sipgate MCP server when a user asks to set up or connect a sipgate account to Codex or Claude. Do not use for ordinary sipgate product questions.
 metadata:
-  version: "0.5.2"
+  version: "0.6.0"
 ---
 
 # Set up sipgate MCP
@@ -10,19 +10,19 @@ metadata:
 Install the matching CLI version with one available package manager:
 
 ```bash
-vp install -g sipgate-mcp@0.5.2
+npm install -g sipgate-mcp@0.6.0
 ```
 
 ```bash
-npm install -g sipgate-mcp@0.5.2
+pnpm add -g sipgate-mcp@0.6.0
 ```
 
 ```bash
-pnpm add -g sipgate-mcp@0.5.2
+vp install -g sipgate-mcp@0.6.0
 ```
 
 Run only one install command. Confirm that `sipgate-mcp --version` reports
-`0.5.2` before continuing.
+`0.6.0` before continuing.
 
 ## Security boundary
 
@@ -86,7 +86,7 @@ user-scoped stdio server. Its interactive prompt asks whether write tools should
 be enabled; do not answer that choice on the user's behalf. The client starts
 and stops that process, so do not launch `sipgate-mcp` as a daemon.
 
-Version 0.5.2 adds user-scoped device, quick-dial, user-number, emergency-
+The server covers user-scoped device, quick-dial, user-number, emergency-
 address, notification, live-call-control, phoneline, voicemail/greeting,
 automated-recording, fax, contact, blacklist, restriction, history-management,
 porting, balance, and sipgate.io self-service. It supports accounts without
@@ -102,6 +102,11 @@ cancellation. Device/faxline/phoneline creation, fax transmission, call
 sessions, recording, and other writes may incur charges or carry legal
 consequences, and address changes can deactivate associated numbers depending
 on country.
+
+When upgrading from 0.5.x: version 0.6.0 renamed 18 tools so that every name
+fits sipgate's 28-character limit for connected MCP tools (see the CHANGELOG
+table). Existing registrations keep working, but client permission allowlists
+or saved prompts that name an old tool must be updated.
 
 When credentials already exist in Keychain, setup reuses them without another
 prompt. Use `--replace-credentials` only when the user explicitly wants to

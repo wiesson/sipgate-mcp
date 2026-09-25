@@ -1,3 +1,4 @@
+import { collectPages, MAX_PAGES } from "./pagination.js";
 import { SipgateApiError, SipgateClient } from "./sipgate-client.js";
 import type {
   AddressUpdateInput,
@@ -353,25 +354,11 @@ export class SipgateBackend implements TelephonyBackend {
    * user through the device their endpoint points at.
    */
   private async listAllAccountNumbers(): Promise<JsonObject[]> {
-    const pageSize = 1000;
-    const all: JsonObject[] = [];
-    for (let offset = 0; ; offset += pageSize) {
-      const response = await this.client.request<JsonValue>("/numbers", {
-        query: { offset, limit: pageSize },
-      });
-      const page = asItems(response);
-      all.push(...page);
-      const envelope = response && !Array.isArray(response) && typeof response === "object"
-        ? response
-        : {};
-      const totalCount = typeof envelope.totalCount === "number" ? envelope.totalCount : undefined;
-      // sipgate may clamp the requested limit, so advance by what it actually
-      // returned and stop once a page comes back empty or the count is reached.
-      if (page.length === 0) break;
-      if (totalCount !== undefined && all.length >= totalCount) break;
-      if (page.length < pageSize) break;
-    }
-    return all;
+    return collectPages(
+      (offset, limit) => this.client.request<JsonValue>("/numbers", { query: { offset, limit } }),
+      asItems,
+      "account numbers",
+    );
   }
 
   private async listDeviceNumbers(
@@ -671,11 +658,15 @@ export class SipgateBackend implements TelephonyBackend {
     });
     const object = response && !Array.isArray(response) && typeof response === "object" ? response : {};
     const items = asItems(response);
-    const totalCount = typeof object.totalCount === "number" ? object.totalCount : items.length;
-    const nextOffset = query.offset + items.length < totalCount ? query.offset + items.length : null;
+    const totalCount = typeof object.totalCount === "number" ? object.totalCount : null;
+    const reached = query.offset + items.length;
+    // Without a total, only a full page suggests that more entries follow.
+    const more = totalCount === null
+      ? items.length > 0 && items.length >= query.limit
+      : reached < totalCount;
     return sanitize({
       items,
-      pagination: { offset: query.offset, limit: query.limit, totalCount, nextOffset },
+      pagination: { offset: query.offset, limit: query.limit, totalCount, nextOffset: more ? reached : null },
     });
   }
 
@@ -2333,17 +2324,28 @@ export class SipgateBackend implements TelephonyBackend {
     const all: JsonObject[] = [];
     const limit = 5000;
     let lastId: string | undefined;
-    for (;;) {
+    const seenCursors = new Set<string>();
+    for (let page = 0; ; page += 1) {
+      if (page === MAX_PAGES) {
+        throw new SipgateApiError(
+          `sipgate kept returning contacts beyond ${MAX_PAGES} pages; the read was stopped instead of looping.`,
+        );
+      }
       const response = await this.listContacts({
         limit,
         ...(lastId === undefined ? {} : { lastId }),
         ...(scopes === undefined ? {} : { scopes }),
       });
-      const page = asItems(response);
-      all.push(...page);
-      if (page.length < limit) break;
-      const nextLastId = stringField(page[page.length - 1] ?? {}, "id");
-      if (!nextLastId || nextLastId === lastId) break;
+      const entries = asItems(response);
+      all.push(...entries);
+      if (entries.length < limit) break;
+      const nextLastId = stringField(entries[entries.length - 1] ?? {}, "id");
+      if (!nextLastId) break;
+      // A repeated cursor would silently truncate a delete-all or import snapshot.
+      if (seenCursors.has(nextLastId)) {
+        throw new SipgateApiError("sipgate returned a contact cursor twice; the read was stopped instead of looping.");
+      }
+      seenCursors.add(nextLastId);
       lastId = nextLastId;
     }
     return sanitize({ items: all, totalCount: all.length });
@@ -2357,22 +2359,21 @@ export class SipgateBackend implements TelephonyBackend {
 
   private async listAllHistoryEntries(): Promise<JsonValue[]> {
     const all: JsonValue[] = [];
-    const pageSize = 1000;
     for (const archived of [false, true]) {
-      for (let offset = 0; ; offset += pageSize) {
-        const response = await this.getCallHistory({
+      all.push(...await collectPages<JsonValue>(
+        (offset, limit) => this.getCallHistory({
           archived,
           offset,
-          limit: pageSize,
+          limit,
           types: ["CALL", "VOICEMAIL", "SMS", "FAX"],
-        });
-        const page = asItems(response);
-        all.push(...page);
-        if (page.length < pageSize) break;
-      }
+        }),
+        asItems,
+        "history entries",
+      ));
     }
     return all;
   }
+
 
   private async mutateHistoryWithReadback(
     entryId: string,

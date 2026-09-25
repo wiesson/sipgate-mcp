@@ -441,12 +441,12 @@ const readEndpointCases: Array<{
     run: (backend) => backend.getDeviceLocalPrefix("e0"),
   },
   {
-    name: "get_device_tariff_announcement",
+    name: "get_tariff_announcement",
     path: "/v2/devices/e0/tariffannouncement",
     run: (backend) => backend.getDeviceTariffAnnouncement("e0"),
   },
   {
-    name: "get_device_single_row_display",
+    name: "get_single_row_display",
     path: "/v2/devices/e0/singlerowdisplay",
     run: (backend) => backend.getDeviceSingleRowDisplay("e0"),
   },
@@ -489,7 +489,7 @@ const readEndpointCases: Array<{
     run: (backend) => backend.getPhoneline("w0", "p0"),
   },
   {
-    name: "get_phoneline_block_anonymous",
+    name: "get_anonymous_call_blocking",
     path: "/v2/w0/phonelines/p0/blockanonymous",
     run: (backend) => backend.getPhonelineBlockAnonymous("w0", "p0"),
   },
@@ -583,28 +583,28 @@ const readbackMutationCases: Array<{
     run: (backend) => backend.setDeviceLocalPrefix("e0", { active: true, value: "0211" }),
   },
   {
-    name: "set_device_tariff_announcement",
+    name: "set_tariff_announcement",
     readPath: "/v2/devices/e0/tariffannouncement",
     writePath: "/v2/devices/e0/tariffannouncement",
     body: { enabled: true },
     run: (backend) => backend.setDeviceTariffAnnouncement("e0", true),
   },
   {
-    name: "set_device_single_row_display",
+    name: "set_single_row_display",
     readPath: "/v2/devices/e0/singlerowdisplay",
     writePath: "/v2/devices/e0/singlerowdisplay",
     body: { enabled: true },
     run: (backend) => backend.setDeviceSingleRowDisplay("e0", true),
   },
   {
-    name: "set_external_device_target_number",
+    name: "set_external_device_target",
     readPath: "/v2/devices/x0",
     writePath: "/v2/devices/x0/external/targetnumber",
     body: { number: "+49211234567" },
     run: (backend) => backend.setExternalDeviceTargetNumber("x0", "+49211234567"),
   },
   {
-    name: "set_external_device_incoming_call_display",
+    name: "set_external_device_display",
     readPath: "/v2/devices/x0",
     writePath: "/v2/devices/x0/external/incomingcalldisplay",
     body: { incomingCallDisplay: "CALLER_NUMBER" },
@@ -637,7 +637,7 @@ const readbackMutationCases: Array<{
     run: (backend) => backend.updatePhonelineAlias("w0", "p0", "Office"),
   },
   {
-    name: "set_phoneline_block_anonymous",
+    name: "set_anonymous_call_blocking",
     readPath: "/v2/w0/phonelines/p0/blockanonymous",
     writePath: "/v2/w0/phonelines/p0/blockanonymous",
     body: { enabled: true, target: "VOICEMAIL" },
@@ -735,7 +735,7 @@ const readbackMutationCases: Array<{
     run: (backend) => backend.setVoicemailTranscription("w0", "p0", "v0", true),
   },
   {
-    name: "create_autorecording_greeting",
+    name: "create_recording_greeting",
     readPath: "/v2/autorecordings/greetings",
     writePath: "/v2/autorecordings/greetings",
     writeMethod: "POST",
@@ -852,7 +852,7 @@ const deleteConfigurationCases: Array<{
     run: (backend) => backend.deletePhoneline("w0", "p0"),
   },
   {
-    name: "delete_autorecording_greeting",
+    name: "delete_recording_greeting",
     readResponse: { id: "ag0" },
     readPath: "/v2/autorecordings/greetings",
     deletePath: "/v2/autorecordings/greetings/ag0",
@@ -1051,7 +1051,7 @@ const notificationMutationCases: Array<{
   run: (backend: SipgateBackend) => Promise<MutationResult>;
 }> = [
   {
-    name: "create_call_email_notification",
+    name: "create_call_email_alert",
     path: "/v2/w0/notifications/call/email",
     body: {
       cause: "MISSED",
@@ -1068,7 +1068,7 @@ const notificationMutationCases: Array<{
     }),
   },
   {
-    name: "create_call_sms_notification",
+    name: "create_call_sms_alert",
     path: "/v2/w0/notifications/call/sms",
     body: {
       cause: "SUCCESSFUL",
@@ -1085,7 +1085,7 @@ const notificationMutationCases: Array<{
     }),
   },
   {
-    name: "create_fax_email_notification",
+    name: "create_fax_email_alert",
     path: "/v2/w0/notifications/fax/email",
     body: {
       direction: "INCOMING",
@@ -1100,7 +1100,7 @@ const notificationMutationCases: Array<{
     }),
   },
   {
-    name: "create_fax_sms_notification",
+    name: "create_fax_sms_alert",
     path: "/v2/w0/notifications/fax/sms",
     body: {
       direction: "OUTGOING",
@@ -1115,7 +1115,7 @@ const notificationMutationCases: Array<{
     }),
   },
   {
-    name: "create_fax_report_notification",
+    name: "create_fax_report_alert",
     path: "/v2/w0/notifications/fax/report",
     body: { email: "me@example.com", faxlineId: "f0" },
     run: (backend) => backend.createFaxReportNotification({
@@ -1125,7 +1125,7 @@ const notificationMutationCases: Array<{
     }),
   },
   {
-    name: "create_sms_email_notification",
+    name: "create_sms_email_alert",
     path: "/v2/w0/notifications/sms/email",
     body: { email: "me@example.com", endpointId: "y0" },
     run: (backend) => backend.createSmsEmailNotification({
@@ -1135,7 +1135,7 @@ const notificationMutationCases: Array<{
     }),
   },
   {
-    name: "create_voicemail_email_notification",
+    name: "create_voicemail_email_alert",
     path: "/v2/w0/notifications/voicemail/email",
     body: { email: "me@example.com", voicemailId: "v0" },
     run: (backend) => backend.createVoicemailEmailNotification({
@@ -1145,7 +1145,7 @@ const notificationMutationCases: Array<{
     }),
   },
   {
-    name: "create_voicemail_sms_notification",
+    name: "create_voicemail_sms_alert",
     path: "/v2/w0/notifications/voicemail/sms",
     body: { number: "+4915799912345", voicemailId: "v0" },
     run: (backend) => backend.createVoicemailSmsNotification({
@@ -1818,5 +1818,157 @@ test("SipgateBackend lists user numbers that are assigned but routed nowhere", a
   assert.deepEqual(requests.map((request) => new URL(request.url).pathname), [
     "/v2/w0/phonelines",
     "/v2/w0/numbers",
+  ]);
+});
+
+function requestLines(requests: RecordedRequest[]): string[] {
+  return requests.map((request) => {
+    const url = new URL(request.url);
+    return `${request.method} ${url.pathname}${url.search}`;
+  });
+}
+
+test("SipgateBackend implements the account_info endpoint and redacts account secrets", async () => {
+  const { backend, requests } = backendWithResponses([
+    { company: "Example GmbH", password: "hidden" },
+    { sub: "w0", domain: "sipgate.de" },
+  ]);
+
+  const result = await backend.getAccountInfo();
+
+  assert.deepEqual(requestLines(requests), [
+    "GET /v2/account",
+    "GET /v2/authorization/userinfo",
+  ]);
+  assert.deepEqual(result, {
+    account: { company: "Example GmbH", password: "[REDACTED]" },
+    authenticatedUser: { sub: "w0", domain: "sipgate.de" },
+  });
+});
+
+test("SipgateBackend implements the account-wide list_users endpoint", async () => {
+  const { backend, requests } = backendWithResponses([{ items: [{ id: "w0" }, { id: "w1" }] }]);
+
+  assert.deepEqual(await backend.listUsers(), { items: [{ id: "w0" }, { id: "w1" }] });
+  assert.deepEqual(requestLines(requests), ["GET /v2/users"]);
+});
+
+test("SipgateBackend implements the account-wide list_numbers endpoint with pagination", async () => {
+  const { backend, requests } = backendWithResponses([{ items: [{ id: "n0", number: "+4921100000" }] }]);
+
+  const result = await backend.listNumbers({ offset: 20, limit: 10 });
+
+  assert.deepEqual(requestLines(requests), ["GET /v2/numbers?offset=20&limit=10"]);
+  assert.deepEqual(result, {
+    items: [{ id: "n0", number: "+4921100000" }],
+    pagination: { offset: 20, limit: 10, returned: 1 },
+  });
+});
+
+test("SipgateBackend lists devices for one user or for every account user", async () => {
+  const single = backendWithResponses([{ items: [{ id: "e0", credentials: { password: "x" } }] }]);
+  assert.deepEqual(await single.backend.listDevices("w0", ["register", "mobile"]), {
+    items: [{ id: "e0", credentials: "[REDACTED]", userId: "w0" }],
+  });
+  assert.deepEqual(requestLines(single.requests), ["GET /v2/w0/devices?type=register%2Cmobile"]);
+
+  const all = backendWithResponses([
+    { items: [{ id: "w0" }, { id: "w1" }] },
+    { items: [{ id: "e0" }] },
+    { items: [{ id: "y1" }] },
+  ]);
+  assert.deepEqual(await all.backend.listDevices(), {
+    items: [{ id: "e0", userId: "w0" }, { id: "y1", userId: "w1" }],
+  });
+  assert.deepEqual(requestLines(all.requests), [
+    "GET /v2/users",
+    "GET /v2/w0/devices",
+    "GET /v2/w1/devices",
+  ]);
+});
+
+test("SipgateBackend maps call_history filters and reports the next offset", async () => {
+  const { backend, requests } = backendWithResponses([
+    { items: [{ id: "h0" }, { id: "h1" }], totalCount: 5 },
+    { items: [{ id: "h4" }], totalCount: 5 },
+  ]);
+
+  const first = await backend.getCallHistory({
+    connectionIds: ["p0"],
+    types: ["CALL", "SMS"],
+    directions: ["MISSED_INCOMING"],
+    offset: 0,
+    limit: 2,
+    from: "2026-09-01T00:00:00Z",
+    phoneNumber: "+4921100000",
+    archived: false,
+  });
+  const last = await backend.getCallHistory({ offset: 4, limit: 2 });
+
+  assert.deepEqual(requestLines(requests), [
+    "GET /v2/history?connectionIds=p0&types=CALL&types=SMS&directions=MISSED_INCOMING&offset=0&limit=2&from=2026-09-01T00%3A00%3A00Z&phonenumber=%2B4921100000&archived=false",
+    "GET /v2/history?types=CALL&offset=4&limit=2",
+  ]);
+  assert.deepEqual(first, {
+    items: [{ id: "h0" }, { id: "h1" }],
+    pagination: { offset: 0, limit: 2, totalCount: 5, nextOffset: 2 },
+  });
+  assert.deepEqual(last, {
+    items: [{ id: "h4" }],
+    pagination: { offset: 4, limit: 2, totalCount: 5, nextOffset: null },
+  });
+});
+
+test("SipgateBackend account Click2Dial posts the documented session payload between call snapshots", async () => {
+  const { backend, requests } = backendWithResponses([
+    { data: [] },
+    { sessionId: "s0" },
+    { data: [{ id: "c0" }] },
+  ]);
+
+  const result = await backend.initiateCall({
+    caller: "e0",
+    callee: "+4915799912345",
+    callerId: "+4921100000",
+  });
+
+  assert.deepEqual(requestLines(requests), [
+    "GET /v2/calls",
+    "POST /v2/sessions/calls",
+    "GET /v2/calls",
+  ]);
+  assert.deepEqual(JSON.parse(requests[1]?.body ?? "null"), {
+    caller: "e0",
+    callee: "+4915799912345",
+    callerId: "+4921100000",
+  });
+  assert.deepEqual(result.before, { data: [] });
+  assert.deepEqual((result.after as { session: JsonValue }).session, { sessionId: "s0" });
+});
+
+test("SipgateBackend keeps paging a history without totalCount while pages are full", async () => {
+  const { backend } = backendWithResponses([
+    { items: [{ id: "h0" }, { id: "h1" }] },
+    { items: [{ id: "h2" }] },
+  ]);
+
+  assert.deepEqual(await backend.getCallHistory({ offset: 0, limit: 2 }), {
+    items: [{ id: "h0" }, { id: "h1" }],
+    pagination: { offset: 0, limit: 2, totalCount: null, nextOffset: 2 },
+  });
+  assert.deepEqual(await backend.getCallHistory({ offset: 2, limit: 2 }), {
+    items: [{ id: "h2" }],
+    pagination: { offset: 2, limit: 2, totalCount: null, nextOffset: null },
+  });
+});
+
+test("SipgateBackend refuses a bulk contact delete when the contact cursor repeats", async () => {
+  const page = Array.from({ length: 5000 }, (_, index) => ({ id: `c${index}` }));
+  const { backend, requests } = backendWithResponses([{ items: page }, { items: page }]);
+
+  await assert.rejects(backend.deleteContacts({}, true), /contact cursor twice/);
+  assert.deepEqual(requestLines(requests), [
+    "GET /v2/contacts?limit=5000",
+    "GET /v2/contacts?limit=5000&lastId=c4999",
   ]);
 });

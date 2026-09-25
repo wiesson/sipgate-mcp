@@ -1454,3 +1454,44 @@ test("user scope refuses to resend a fax belonging to another user", async () =>
   );
   assert.equal(delegate.calls.some((call) => call.method === "resendFax"), false);
 });
+
+test("user-scope bulk history delete keeps paging past a filtered first page", async () => {
+  const delegate = new FakeBackend();
+  delegate.routing = {
+    numbers: [{ id: "n0", number: "+49211123456" }],
+    users: [{ userId: "w0", phonelines: [] }],
+  };
+  delegate.smsExtensions = { items: [] };
+  delegate.faxlines = { items: [] };
+  // Without filterable extensions the history is read unfiltered and trimmed
+  // to owned entries, so a page can be short although more pages follow.
+  const pages: Record<string, JsonValue> = {
+    "false:0": {
+      items: [
+        { id: "h0", source: "+49211123456", target: "+4915799912345" },
+        { id: "h9", source: "+49302222222", target: "+49303333333" },
+      ],
+      pagination: { offset: 0, limit: 1000, totalCount: 1001, nextOffset: 1000 },
+    },
+    "false:1000": {
+      items: [{ id: "h5", source: "+4915799912345", target: "+49211123456" }],
+      pagination: { offset: 1000, limit: 1000, totalCount: 1001, nextOffset: null },
+    },
+    "true:0": { items: [], pagination: { offset: 0, limit: 1000, totalCount: 0, nextOffset: null } },
+  };
+  const requested: string[] = [];
+  delegate.getCallHistory = async (query: HistoryQuery) => {
+    const key = `${String(query.archived)}:${query.offset}`;
+    requested.push(key);
+    return pages[key] ?? { items: [], pagination: { nextOffset: null } };
+  };
+  const backend = await createAccessControlledBackend(delegate, "user");
+
+  await backend.deleteHistoryEntries();
+
+  assert.deepEqual(requested, ["false:0", "false:1000", "true:0"]);
+  assert.deepEqual(delegate.calls.find((call) => call.method === "deleteHistoryEntries"), {
+    method: "deleteHistoryEntries",
+    args: [["h0", "h5"]],
+  });
+});
