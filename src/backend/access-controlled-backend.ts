@@ -42,6 +42,7 @@ import type {
   VoicemailSettingsInput,
   VoicemailSmsNotificationInput,
 } from "./telephony-backend.js";
+import { collectPages } from "./pagination.js";
 
 export class AccessPolicyError extends Error {
   public constructor(message: string) {
@@ -1432,23 +1433,23 @@ export class AccessControlledBackend implements TelephonyBackend {
   private async ownedHistoryEntryIds(): Promise<string[]> {
     try {
       const found = new Set<string>();
-      const pageSize = 1000;
       for (const archived of [false, true]) {
-        for (let offset = 0; ; offset += pageSize) {
-          // Route through the scoped reader so device IDs never reach sipgate
-          // as connection filters and unfilterable accounts still enumerate.
-          const response = await this.getCallHistory({
+        // Route through the scoped reader so device IDs never reach sipgate
+        // as connection filters and unfilterable accounts still enumerate.
+        // Its entries may be filtered, so collectPages follows nextOffset.
+        const entries = await collectPages(
+          (offset, limit) => this.getCallHistory({
             archived,
-            limit: pageSize,
+            limit,
             offset,
             types: ["CALL", "VOICEMAIL", "SMS", "FAX"],
-          });
-          const page = items(response);
-          for (const entry of page) {
-            const entryId = stringField(entry, "id");
-            if (entryId) found.add(entryId);
-          }
-          if (page.length < pageSize) break;
+          }),
+          items,
+          "history entries",
+        );
+        for (const entry of entries) {
+          const entryId = stringField(entry, "id");
+          if (entryId) found.add(entryId);
         }
       }
       return [...found];
@@ -1854,16 +1855,11 @@ export class AccessControlledBackend implements TelephonyBackend {
   }
 
   private async ownedNumbers(): Promise<OwnedNumbers> {
-    const pageSize = 1000;
-    const routed: JsonObject[] = [];
-    for (let offset = 0; ; offset += pageSize) {
-      const page = items(await this.delegate.listUserNumbers(
-        this.context.userId,
-        { offset, limit: pageSize },
-      ));
-      routed.push(...page);
-      if (page.length < pageSize) break;
-    }
+    const routed = await collectPages(
+      (offset, limit) => this.delegate.listUserNumbers(this.context.userId, { offset, limit }),
+      items,
+      "user numbers",
+    );
     // Quick dials and other number types are listed by the direct user-number
     // endpoint but may never appear in phoneline or device routing.
     const direct = items(await this.delegate.getUserNumbers(this.context.userId));

@@ -109,7 +109,7 @@ addition to sipgate's own user role and PAT scopes:
 
 | Value | Behavior |
 | --- | --- |
-| `user` (default) | Resolves the authenticated user through `/authorization/userinfo`; returns only that user and their assigned numbers, notifications, faxlines, phonelines, voicemails, greetings, and attached devices; forces user-specific device, routing, restriction, and settings reads; constrains history reads, exports, and mutations to owned connections/entries; and validates every write target against owned numbers, phonelines, nested voicemail/forwarding/greeting resources, devices, faxlines, notifications, or emergency addresses associated with an owned device/number. Account-wide contact, blacklist, porting-cancellation, and sipgate.io writes require `confirm_account_wide: true`; their reads are allowed and clearly labelled account-wide. |
+| `user` (default) | Resolves the authenticated user through `/authorization/userinfo`; returns only that user and their assigned numbers, notifications, faxlines, phonelines, voicemails, greetings, and attached devices; forces user-specific device, routing, restriction, and settings reads; constrains history reads, exports, and mutations to owned connections/entries; and validates every write target against owned numbers, phonelines, nested voicemail/forwarding/greeting resources, devices, faxlines, notifications, or emergency addresses associated with an owned device/number. Account-wide contact, blacklist, porting-cancellation, and sipgate.io writes require `confirm_account_wide: true`; their reads are allowed and clearly labelled account-wide. Every `user_id` parameter is optional and defaults to the authenticated user; another user's ID is rejected. |
 | `account` | Enables account-wide reads and writes. Startup fails unless `/users/{authenticatedUserId}` reports `admin: true`. Requires `users:read` for the administrator check. |
 
 Token scopes are permission ceilings, not role elevation. For example,
@@ -141,8 +141,8 @@ listed specific and parent scopes offered by the PAT UI when in doubt.
 | `get_device` | Read | Ownership `GET /{self}/devices`, then `GET /devices/{deviceId}` | `devices:read` |
 | `get_device_caller_id` | Read | Device ownership read, then `GET /devices/{deviceId}/callerid` | `devices:read`, `devices:callerid:read` |
 | `get_device_local_prefix` | Read | Device ownership read, then `GET /devices/{deviceId}/localprefix` | `devices:read`, `devices:localprefix:read` |
-| `get_device_tariff_announcement` | Read | Device ownership read, then `GET /devices/{deviceId}/tariffannouncement` | `devices:read`, `devices:tariffannouncement:read` |
-| `get_device_single_row_display` | Read | Device ownership read, then `GET /devices/{deviceId}/singlerowdisplay` | `devices:read`, `devices:singlerowdisplay:read` |
+| `get_tariff_announcement` | Read | Device ownership read, then `GET /devices/{deviceId}/tariffannouncement` | `devices:read`, `devices:tariffannouncement:read` |
+| `get_single_row_display` | Read | Device ownership read, then `GET /devices/{deviceId}/singlerowdisplay` | `devices:read`, `devices:singlerowdisplay:read` |
 | `get_device_contingents` | Read | Device/user ownership reads, then `GET /{userId}/devices/{deviceId}/contingents` | `devices:read` |
 | `list_user_numbers` | Read | `GET /{userId}/numbers`; this direct endpoint never uses phonelines | `numbers:read` |
 | `validate_quick_dial` | Read | `GET /numbers/quickdial/validation/{quickDialNumber}` | `numbers:read` |
@@ -155,8 +155,9 @@ listed specific and parent scopes offered by the PAT UI when in doubt.
 | `list_notifications` | Read | `GET /{userId}/notifications` | `notifications:read` |
 | `list_faxlines` | Read | `GET /{userId}/faxlines` | `faxlines:read` |
 | `list_faxline_numbers` | Read | User: faxline ownership read, then `GET /{userId}/faxlines/{faxlineId}/numbers`; account: direct `GET` | `faxlines:read`, `faxlines:numbers:read` |
+| `list_phonelines` | Read | `GET /{userId}/phonelines`; an account without a phoneline layer returns an empty list with `phonelinesAvailable: false` | `phonelines:read` |
 | `get_phoneline` | Read | Owned-phoneline lookup, then `GET /{userId}/phonelines/{phonelineId}` | `phonelines:read` |
-| `get_phoneline_block_anonymous` | Read | Owned-phoneline lookup, then `GET /{userId}/phonelines/{phonelineId}/blockanonymous` | `phonelines:read`, `phonelines:blockanonymous:read` |
+| `get_anonymous_call_blocking` | Read | Owned-phoneline lookup, then `GET /{userId}/phonelines/{phonelineId}/blockanonymous` | `phonelines:read`, `phonelines:blockanonymous:read` |
 | `list_phoneline_devices` | Read | Owned-phoneline/device filtering, then `GET /{userId}/phonelines/{phonelineId}/devices` | `phonelines:read`, `phonelines:devices:read`; user filtering also needs `devices:read` |
 | `list_parallel_forwardings` | Read | Owned-phoneline lookup, then `GET /{userId}/phonelines/{phonelineId}/parallelforwardings` | `phonelines:read`, `phonelines:parallelforwardings:read` |
 | `list_phoneline_voicemails` | Read | Owned-phoneline lookup, then `GET /{userId}/phonelines/{phonelineId}/voicemails` | `phonelines:read`, `phonelines:voicemails:read` |
@@ -169,7 +170,7 @@ listed specific and parent scopes offered by the PAT UI when in doubt.
 | `create_phoneline` | Write/action | `POST /{userId}/phonelines`; 403/404 becomes a clean unavailable result | `phonelines:write` |
 | `update_phoneline_alias` | Write | Owned-phoneline before/after reads and `PUT /{userId}/phonelines/{phonelineId}` | `phonelines:read`, `phonelines:write` |
 | `delete_phoneline` | Write | Owned-phoneline before-state read and `DELETE /{userId}/phonelines/{phonelineId}` | `phonelines:read`, `phonelines:write` |
-| `set_phoneline_block_anonymous` | Write | Owned-phoneline setting reads and `PUT /{userId}/phonelines/{phonelineId}/blockanonymous` | `phonelines:read`, `phonelines:blockanonymous:read`, `phonelines:blockanonymous:write` |
+| `set_anonymous_call_blocking` | Write | Owned-phoneline setting reads and `PUT /{userId}/phonelines/{phonelineId}/blockanonymous` | `phonelines:read`, `phonelines:blockanonymous:read`, `phonelines:blockanonymous:write` |
 | `attach_device_to_phoneline` | Write/action | Owned phoneline/device reads, pre/post assignment reads, and `POST /{userId}/phonelines/{phonelineId}/devices` | `phonelines:read`, `phonelines:devices:read`, `phonelines:devices:write`, `devices:read` |
 | `detach_device_from_phoneline` | Write | Owned phoneline/device reads, pre/post assignment reads, and `DELETE /{userId}/phonelines/{phonelineId}/devices/{deviceId}` | `phonelines:read`, `phonelines:devices:read`, `phonelines:devices:write`, `devices:read` |
 | `create_parallel_forwarding` | Write/action | Owned-phoneline check, pre/post forwarding reads, and `POST /{userId}/phonelines/{phonelineId}/parallelforwardings` | `phonelines:read`, `phonelines:write`, `phonelines:parallelforwardings:read`, `phonelines:parallelforwardings:write` |
@@ -182,8 +183,8 @@ listed specific and parent scopes offered by the PAT UI when in doubt.
 | `set_voicemail_transcription` | Write | Verify owned voicemail, pre/post voicemail reads, and `PUT /{userId}/phonelines/{phonelineId}/voicemails/{voicemailId}/transcriptions` | `phonelines:read`, `phonelines:write`, `phonelines:voicemails:read`, `phonelines:voicemails:write` |
 | `play_voicemail` | Write/action | User: verify owned device and history/data entry; then `POST /sessions/voicemail/play` | `sessions:write`, `sessions:calls:write`; user ownership also needs `devices:read`, `history:read` and owned-connection scopes |
 | `record_voicemail_greeting` | Write/action | User: verify owned device and target voicemail; then `POST /sessions/voicemail/recording` | `sessions:write`, `sessions:calls:write`; user ownership also needs `devices:read`, `phonelines:read`, `phonelines:voicemails:read` |
-| `create_autorecording_greeting` | Write/action | Account scope only: pre/post `GET /autorecordings/greetings`, `POST /autorecordings/greetings` | `autorecording:greeting:read`, `autorecording:greeting:write`; sipgate requires administrator privileges and activated call recording |
-| `delete_autorecording_greeting` | Write | Account scope only: before-state read, then `DELETE /autorecordings/greetings/{greetingId}` | `autorecording:greeting:read`, `autorecording:greeting:write`; sipgate requires administrator privileges and activated call recording |
+| `create_recording_greeting` | Write/action | Account scope only: pre/post `GET /autorecordings/greetings`, `POST /autorecordings/greetings` | `autorecording:greeting:read`, `autorecording:greeting:write`; sipgate requires administrator privileges and activated call recording |
+| `delete_recording_greeting` | Write | Account scope only: before-state read, then `DELETE /autorecordings/greetings/{greetingId}` | `autorecording:greeting:read`, `autorecording:greeting:write`; sipgate requires administrator privileges and activated call recording |
 | `set_autorecording_settings` | Write | Owned phoneline/faxline extension lookup, pre/post setting reads, and `PUT /autorecordings/{extension}/settings` | `devices:read`; ownership also needs `phonelines:read`, `faxlines:read` |
 | `create_faxline` | Write/action | `POST /{userId}/faxlines` | `faxlines:write` |
 | `update_faxline_alias` | Write | Owned-faxline pre/post list reads and `PUT /{userId}/faxlines/{faxlineId}` | `faxlines:read`, `faxlines:write` |
@@ -231,10 +232,10 @@ listed specific and parent scopes offered by the PAT UI when in doubt.
 | `set_device_alias` | Write | Device ownership read; pre/post device reads and `PUT /devices/{deviceId}/alias` | `devices:read`, `devices:write` |
 | `set_device_caller_id` | Write | Device and caller-number ownership reads; pre/post caller-ID reads and `PUT /devices/{deviceId}/callerid` | `devices:read`, `devices:write`, `devices:callerid:read`, `devices:callerid:write`, plus owned-number read scopes |
 | `set_device_local_prefix` | Write | Device ownership read; pre/post setting reads and `PUT /devices/{deviceId}/localprefix` | `devices:read`, `devices:write`, `devices:localprefix:read`, `devices:localprefix:write` |
-| `set_device_tariff_announcement` | Write | Device ownership read; pre/post setting reads and `PUT /devices/{deviceId}/tariffannouncement` | `devices:read`, `devices:write`, `devices:tariffannouncement:read`, `devices:tariffannouncement:write` |
-| `set_device_single_row_display` | Write | Device ownership read; pre/post setting reads and `PUT /devices/{deviceId}/singlerowdisplay` | `devices:read`, `devices:write`, `devices:singlerowdisplay:read`, `devices:singlerowdisplay:write` |
-| `set_external_device_target_number` | Write | Device ownership read; pre/post device reads and `PUT /devices/{deviceId}/external/targetnumber` | `devices:read`, `devices:write` |
-| `set_external_device_incoming_call_display` | Write | Device ownership read; pre/post device reads and `PUT /devices/{deviceId}/external/incomingcalldisplay` | `devices:read`, `devices:write` |
+| `set_tariff_announcement` | Write | Device ownership read; pre/post setting reads and `PUT /devices/{deviceId}/tariffannouncement` | `devices:read`, `devices:write`, `devices:tariffannouncement:read`, `devices:tariffannouncement:write` |
+| `set_single_row_display` | Write | Device ownership read; pre/post setting reads and `PUT /devices/{deviceId}/singlerowdisplay` | `devices:read`, `devices:write`, `devices:singlerowdisplay:read`, `devices:singlerowdisplay:write` |
+| `set_external_device_target` | Write | Device ownership read; pre/post device reads and `PUT /devices/{deviceId}/external/targetnumber` | `devices:read`, `devices:write` |
+| `set_external_device_display` | Write | Device ownership read; pre/post device reads and `PUT /devices/{deviceId}/external/incomingcalldisplay` | `devices:read`, `devices:write` |
 | `change_device_password` | Write/action | Device ownership/before-state reads, then `POST /devices/{deviceId}/credentials/password`; the response is redacted | `devices:read`, `devices:write` |
 | `create_register_device` | Write/action | `POST /{userId}/devices/register` | `devices:write` |
 | `create_mobile_device` | Write/action | `POST /{userId}/devices/mobile` | `devices:write` |
@@ -245,14 +246,14 @@ listed specific and parent scopes offered by the PAT UI when in doubt.
 | `update_address` | Write | Address ownership and pre/post address reads, then `PUT /addresses/{addressId}` | `addresses:read`, `addresses:write`, plus user ownership read scopes |
 | `send_sms` | Write/action | `GET /{userId}/sms`, pre/post `GET /history`, `POST /sessions/sms` | `sms:read`, `history:read`, `sessions:write`, `sessions:sms:write` |
 | `initiate_call` | Write/action | User: device/number ownership reads, then `POST /sessions/calls`; account: pre/post `GET /calls` plus `POST` | `sessions:write`, `sessions:calls:write`; user also needs `devices:read`, `phonelines:read`, `phonelines:numbers:read`; account needs `rtcm:read` |
-| `create_call_email_notification` | Write/action | User: endpoint ownership reads; all modes: pre/post `GET /{userId}/notifications`, `POST /{userId}/notifications/call/email` | `notifications:read`, `notifications:write`; user also needs `devices:read` or `phonelines:read` |
-| `create_call_sms_notification` | Write/action | User: endpoint ownership reads; all modes: pre/post notification reads, `POST /{userId}/notifications/call/sms` | `notifications:read`, `notifications:write`; user also needs `devices:read` or `phonelines:read` |
-| `create_fax_email_notification` | Write/action | User: faxline ownership read; all modes: pre/post notification reads, `POST /{userId}/notifications/fax/email` | `notifications:read`, `notifications:write`; user also needs `faxlines:read` |
-| `create_fax_sms_notification` | Write/action | User: faxline ownership read; all modes: pre/post notification reads, `POST /{userId}/notifications/fax/sms` | `notifications:read`, `notifications:write`; user also needs `faxlines:read` |
-| `create_fax_report_notification` | Write/action | User: faxline ownership read; all modes: pre/post notification reads, `POST /{userId}/notifications/fax/report` | `notifications:read`, `notifications:write`; user also needs `faxlines:read` |
-| `create_sms_email_notification` | Write/action | Pre/post notification reads, `POST /{userId}/notifications/sms/email` | `notifications:read`, `notifications:write` |
-| `create_voicemail_email_notification` | Write/action | Pre/post notification reads, `POST /{userId}/notifications/voicemail/email` | `notifications:read`, `notifications:write` |
-| `create_voicemail_sms_notification` | Write/action | Pre/post notification reads, `POST /{userId}/notifications/voicemail/sms` | `notifications:read`, `notifications:write` |
+| `create_call_email_alert` | Write/action | User: endpoint ownership reads; all modes: pre/post `GET /{userId}/notifications`, `POST /{userId}/notifications/call/email` | `notifications:read`, `notifications:write`; user also needs `devices:read` or `phonelines:read` |
+| `create_call_sms_alert` | Write/action | User: endpoint ownership reads; all modes: pre/post notification reads, `POST /{userId}/notifications/call/sms` | `notifications:read`, `notifications:write`; user also needs `devices:read` or `phonelines:read` |
+| `create_fax_email_alert` | Write/action | User: faxline ownership read; all modes: pre/post notification reads, `POST /{userId}/notifications/fax/email` | `notifications:read`, `notifications:write`; user also needs `faxlines:read` |
+| `create_fax_sms_alert` | Write/action | User: faxline ownership read; all modes: pre/post notification reads, `POST /{userId}/notifications/fax/sms` | `notifications:read`, `notifications:write`; user also needs `faxlines:read` |
+| `create_fax_report_alert` | Write/action | User: faxline ownership read; all modes: pre/post notification reads, `POST /{userId}/notifications/fax/report` | `notifications:read`, `notifications:write`; user also needs `faxlines:read` |
+| `create_sms_email_alert` | Write/action | Pre/post notification reads, `POST /{userId}/notifications/sms/email` | `notifications:read`, `notifications:write` |
+| `create_voicemail_email_alert` | Write/action | Pre/post notification reads, `POST /{userId}/notifications/voicemail/email` | `notifications:read`, `notifications:write` |
+| `create_voicemail_sms_alert` | Write/action | Pre/post notification reads, `POST /{userId}/notifications/voicemail/sms` | `notifications:read`, `notifications:write` |
 | `delete_notification` | Write | User: verify the nested ID in `GET /{userId}/notifications`; all modes: before/after notification reads and `DELETE /{userId}/notifications/{notificationId}` | `notifications:read`, `notifications:write` |
 | `hangup_call` | Write | User: participant ownership read; all modes: before/after `GET /calls`, `DELETE /calls/{callId}` | `rtcm:read`, `rtcm:write`; user also needs owned-device/number read scopes |
 | `set_call_hold` | Write | User: participant ownership read; before/after `GET /calls`, `PUT /calls/{callId}/hold` | `rtcm:read`, `rtcm:write`; user also needs owned-device/number read scopes |
@@ -294,7 +295,7 @@ Every write tool returns a JSON object with `before` and `after`. Where a resour
 
 ## Read-only mode
 
-Set `SIPGATE_MCP_READONLY=1` to register only the 47 read tools. Write tools are absent from `tools/list`, rather than merely failing when called.
+Set `SIPGATE_MCP_READONLY=1` to register only the 48 read tools. Write tools are absent from `tools/list`, rather than merely failing when called.
 
 ```bash
 export SIPGATE_MCP_READONLY=1
@@ -408,7 +409,10 @@ MCP stdio server
   confirmation where documented above.
 - Account scope fails startup unless the authenticated sipgate user reports `admin: true`.
 - The Basic Auth header exists only in memory and is sent only to the fixed sipgate API base URL.
-- API error bodies are discarded. User-facing errors never include request headers, response bodies, or credentials.
+- API error bodies are not passed on. The single exception is a denial sentence that sipgate is known to send, such as "This endpoint requires a sipgate Classic PBX Account": it is recognised by exact match and quoted from a built-in list, never from the response. `Retry-After` is parsed and never echoed. Every error message has the configured PAT-ID, PAT, and Basic credential replaced by `[REDACTED]`, and request headers never appear in errors.
+- Every request attempt has a 30-second deadline covering headers and body (a retried read can take about 65 seconds in total). A read that sipgate throttles (HTTP 429/503) is retried once after at most 5 seconds; writes are never retried automatically, and a write that times out or loses the connection is reported as possibly applied so the caller checks the state before trying again.
+- Paginated reads follow sipgate's offsets up to 100 pages of 1000 entries (contacts: 100 cursor pages) and then stop with an error instead of looping. A continuation that does not move forward is an error, not a silent end.
+- When a tool fails after sipgate has already accepted one of its writes, the result says `applied: true`, lists the accepted requests with any session or call ID, and tells the agent not to repeat the action. Only a failure before any write is reported as a plain error.
 - Potentially sensitive response properties such as `credentials`, `password`, `token`, and `secret` are redacted before tool output.
 - The server writes no application logs to stdout; stdout is reserved for MCP stdio frames.
 - `.env*`, fetched research data, build output, and package tarballs are ignored by Git.

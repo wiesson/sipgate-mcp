@@ -1,5 +1,80 @@
 # Changelog
 
+## 0.6.0 - 2026-09-25
+
+Breaking: 18 tools are renamed so that every tool name fits the 28-character
+limit sipgate's AI agent sona applies to connected MCP tools. Backend method
+names and behaviour are unchanged; update client allowlists and saved prompts.
+
+| Before (0.5.x) | Since 0.6.0 |
+| --- | --- |
+| `set_external_device_target_number` | `set_external_device_target` |
+| `set_external_device_incoming_call_display` | `set_external_device_display` |
+| `get_device_tariff_announcement` | `get_tariff_announcement` |
+| `set_device_tariff_announcement` | `set_tariff_announcement` |
+| `get_device_single_row_display` | `get_single_row_display` |
+| `set_device_single_row_display` | `set_single_row_display` |
+| `get_phoneline_block_anonymous` | `get_anonymous_call_blocking` |
+| `set_phoneline_block_anonymous` | `set_anonymous_call_blocking` |
+| `create_autorecording_greeting` | `create_recording_greeting` |
+| `delete_autorecording_greeting` | `delete_recording_greeting` |
+| `create_call_email_notification` | `create_call_email_alert` |
+| `create_call_sms_notification` | `create_call_sms_alert` |
+| `create_fax_email_notification` | `create_fax_email_alert` |
+| `create_fax_sms_notification` | `create_fax_sms_alert` |
+| `create_fax_report_notification` | `create_fax_report_alert` |
+| `create_sms_email_notification` | `create_sms_email_alert` |
+| `create_voicemail_email_notification` | `create_voicemail_email_alert` |
+| `create_voicemail_sms_notification` | `create_voicemail_sms_alert` |
+
+- Make `user_id` optional in user scope. It defaults to the authenticated user
+  before anything is delegated, so an agent no longer has to look up its own ID
+  first; 49 tools, including `send_sms`, previously required it. An explicit
+  foreign ID is still rejected, and account scope still requires the ID.
+- Add `list_phonelines`. Nine tools need a `phoneline_id`, and the backend
+  already implemented the listing, but no tool exposed it.
+- Report a write that sipgate accepted as applied when a later step of the same
+  tool call fails. Reading the result back after a successful `send_sms`,
+  Click2Dial, call control, or any other write used to surface as a plain,
+  retryable error, which invited a second SMS or call. The result now says
+  `applied: true`, lists the accepted requests with any session or call ID, and
+  says not to repeat the action. A later failed write names the requests that
+  were already accepted.
+- Advertise fields with defaults as optional in the tool schemas. `offset` and
+  `limit` of `list_numbers`, `call_history`, `export_history`, `list_contacts`,
+  and `get_contacts_vcard` were listed as required.
+- Bound every request: each attempt has a 30-second deadline that covers the
+  response headers and the body. A write that times out, loses the connection,
+  or gets a server error is reported as possibly applied, so an agent checks
+  the state instead of sending it again. A write whose confirmation body is not
+  JSON is treated as accepted.
+- Retry a read once when sipgate answers HTTP 429 or 503, honouring
+  `Retry-After` (seconds or HTTP date) up to 5 seconds. Longer waits are
+  reported instead of blocking the tool call, and writes are never retried.
+- Stop passing sipgate's error text into tool results. Only denial sentences
+  sipgate is known to send are shown, quoted from a built-in list; any other
+  body is dropped. Before, any short plain-text body passed, including one that
+  echoed the raw PAT or read like an instruction. `Retry-After` is parsed and
+  no longer echoed, and every error message is scrubbed of the configured
+  PAT-ID, PAT, and Basic credential.
+- Read paginated results through one bounded helper. It follows the
+  `nextOffset` of filtered history pages, so bulk history deletion on accounts
+  without history extensions no longer stops after the first page and leaves
+  owned entries behind. Offsets advance by what sipgate returned, a
+  continuation that does not move forward is an error, and a misbehaving
+  endpoint stops after 100 pages. `call_history` no longer invents a total when
+  sipgate omits it, and reports a next offset after a full page.
+- Bound the contact cursor used by bulk contact deletion and CSV import, and
+  refuse a cursor that repeats instead of truncating the snapshot silently.
+- Require `limit >= 1` for `export_history`, matching `call_history`.
+- Describe where `faxline_id` and `phoneline_id` values come from, and link the
+  alert tools to `list_notifications` and `delete_notification`.
+- Correct the README's error-handling claims, list npm first in the setup
+  skill, and sync `package-lock.json`, which still said 0.5.1.
+- Add HTTP-level tests for `account_info`, `list_users`, `list_numbers`,
+  `list_devices`, `call_history`, and account-scope Click2Dial, plus tests that
+  keep every tool name unique and at most 28 characters long.
+
 ## 0.5.2 - 2026-08-30
 
 - Never send device IDs as history connection filters. sipgate answers HTTP 403

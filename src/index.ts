@@ -18,7 +18,8 @@ export async function main(): Promise<void> {
   const client = new SipgateClient({ tokenId: config.tokenId, token: config.token });
   const sipgateBackend = new SipgateBackend(client);
   const backend = await createAccessControlledBackend(sipgateBackend, config.accessScope);
-  const server = createServer(backend, config.readonly, config.accessScope);
+  const { userId } = await backend.getAuthenticatedUser();
+  const server = createServer(backend, config.readonly, config.accessScope, userId);
   await server.connect(new StdioServerTransport());
 }
 

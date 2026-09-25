@@ -42,6 +42,11 @@ import type {
   VoicemailSettingsInput,
   VoicemailSmsNotificationInput,
 } from "../src/backend/telephony-backend.js";
+import { z } from "zod";
+import {
+  AccessPolicyError,
+  createAccessControlledBackend,
+} from "../src/backend/access-controlled-backend.js";
 import { createToolDefinitions } from "../src/tools/definitions.js";
 
 class FakeBackend implements TelephonyBackend {
@@ -526,15 +531,15 @@ test("get_device_local_prefix tool", async () => {
   assert.deepEqual(backend.calls, [{ method: "getDeviceLocalPrefix", args: ["e0"] }]);
 });
 
-test("get_device_tariff_announcement tool", async () => {
+test("get_tariff_announcement tool", async () => {
   const backend = new FakeBackend();
-  await invoke(backend, "get_device_tariff_announcement", { device_id: "e0" });
+  await invoke(backend, "get_tariff_announcement", { device_id: "e0" });
   assert.deepEqual(backend.calls, [{ method: "getDeviceTariffAnnouncement", args: ["e0"] }]);
 });
 
-test("get_device_single_row_display tool", async () => {
+test("get_single_row_display tool", async () => {
   const backend = new FakeBackend();
-  await invoke(backend, "get_device_single_row_display", { device_id: "e0" });
+  await invoke(backend, "get_single_row_display", { device_id: "e0" });
   assert.deepEqual(backend.calls, [{ method: "getDeviceSingleRowDisplay", args: ["e0"] }]);
 });
 
@@ -661,27 +666,27 @@ test("set_device_local_prefix tool", async () => {
   }]);
 });
 
-test("set_device_tariff_announcement tool", async () => {
+test("set_tariff_announcement tool", async () => {
   const backend = new FakeBackend();
-  await invoke(backend, "set_device_tariff_announcement", { device_id: "e0", enabled: true });
+  await invoke(backend, "set_tariff_announcement", { device_id: "e0", enabled: true });
   assert.deepEqual(backend.calls, [{ method: "setDeviceTariffAnnouncement", args: ["e0", true] }]);
 });
 
-test("set_device_single_row_display tool", async () => {
+test("set_single_row_display tool", async () => {
   const backend = new FakeBackend();
-  await invoke(backend, "set_device_single_row_display", { device_id: "e0", enabled: true });
+  await invoke(backend, "set_single_row_display", { device_id: "e0", enabled: true });
   assert.deepEqual(backend.calls, [{ method: "setDeviceSingleRowDisplay", args: ["e0", true] }]);
 });
 
-test("set_external_device_target_number tool", async () => {
+test("set_external_device_target tool", async () => {
   const backend = new FakeBackend();
-  await invoke(backend, "set_external_device_target_number", { device_id: "x0", number: "+49211234567" });
+  await invoke(backend, "set_external_device_target", { device_id: "x0", number: "+49211234567" });
   assert.deepEqual(backend.calls, [{ method: "setExternalDeviceTargetNumber", args: ["x0", "+49211234567"] }]);
 });
 
-test("set_external_device_incoming_call_display tool", async () => {
+test("set_external_device_display tool", async () => {
   const backend = new FakeBackend();
-  await invoke(backend, "set_external_device_incoming_call_display", {
+  await invoke(backend, "set_external_device_display", {
     device_id: "x0",
     incoming_call_display: "CALLER_NUMBER",
   });
@@ -963,7 +968,7 @@ const newToolCases: Array<{
     args: ["w0", "f0"],
   },
   {
-    name: "create_call_email_notification",
+    name: "create_call_email_alert",
     input: {
       user_id: "w0",
       endpoint_id: "e0",
@@ -981,7 +986,7 @@ const newToolCases: Array<{
     }],
   },
   {
-    name: "create_call_sms_notification",
+    name: "create_call_sms_alert",
     input: {
       user_id: "w0",
       endpoint_id: "e0",
@@ -999,7 +1004,7 @@ const newToolCases: Array<{
     }],
   },
   {
-    name: "create_fax_email_notification",
+    name: "create_fax_email_alert",
     input: {
       user_id: "w0",
       faxline_id: "f0",
@@ -1015,7 +1020,7 @@ const newToolCases: Array<{
     }],
   },
   {
-    name: "create_fax_sms_notification",
+    name: "create_fax_sms_alert",
     input: {
       user_id: "w0",
       faxline_id: "f0",
@@ -1031,25 +1036,25 @@ const newToolCases: Array<{
     }],
   },
   {
-    name: "create_fax_report_notification",
+    name: "create_fax_report_alert",
     input: { user_id: "w0", faxline_id: "f0", email: "me@example.com" },
     method: "createFaxReportNotification",
     args: [{ userId: "w0", faxlineId: "f0", email: "me@example.com" }],
   },
   {
-    name: "create_sms_email_notification",
+    name: "create_sms_email_alert",
     input: { user_id: "w0", endpoint_id: "y0", email: "me@example.com" },
     method: "createSmsEmailNotification",
     args: [{ userId: "w0", endpointId: "y0", email: "me@example.com" }],
   },
   {
-    name: "create_voicemail_email_notification",
+    name: "create_voicemail_email_alert",
     input: { user_id: "w0", voicemail_id: "v0", email: "me@example.com" },
     method: "createVoicemailEmailNotification",
     args: [{ userId: "w0", voicemailId: "v0", email: "me@example.com" }],
   },
   {
-    name: "create_voicemail_sms_notification",
+    name: "create_voicemail_sms_alert",
     input: { user_id: "w0", voicemail_id: "v0", number: "+4915799912345" },
     method: "createVoicemailSmsNotification",
     args: [{ userId: "w0", voicemailId: "v0", number: "+4915799912345" }],
@@ -1130,7 +1135,7 @@ const newToolCases: Array<{
   },
   { name: "get_phoneline", input: { user_id: "w0", phoneline_id: "p0" }, method: "getPhoneline", args: ["w0", "p0"] },
   {
-    name: "get_phoneline_block_anonymous",
+    name: "get_anonymous_call_blocking",
     input: { user_id: "w0", phoneline_id: "p0" },
     method: "getPhonelineBlockAnonymous",
     args: ["w0", "p0"],
@@ -1188,7 +1193,7 @@ const newToolCases: Array<{
     args: ["w0", "p0"],
   },
   {
-    name: "set_phoneline_block_anonymous",
+    name: "set_anonymous_call_blocking",
     input: { user_id: "w0", phoneline_id: "p0", enabled: true, target: "VOICEMAIL" },
     method: "setPhonelineBlockAnonymous",
     args: ["w0", "p0", { enabled: true, target: "VOICEMAIL" }],
@@ -1266,13 +1271,13 @@ const newToolCases: Array<{
     args: [{ deviceId: "e0", endpoint: "MAIN", targetId: "v0" }],
   },
   {
-    name: "create_autorecording_greeting",
+    name: "create_recording_greeting",
     input: { filename: "notice.mp3", base64_content: "YWJj" },
     method: "createAutorecordingGreeting",
     args: [{ base64Content: "YWJj", filename: "notice.mp3" }],
   },
   {
-    name: "delete_autorecording_greeting",
+    name: "delete_recording_greeting",
     input: { greeting_id: "ag0" },
     method: "deleteAutorecordingGreeting",
     args: ["ag0"],
@@ -1310,6 +1315,13 @@ const newToolCases: Array<{
   },
 ];
 
+newToolCases.push({
+  name: "list_phonelines",
+  input: { user_id: "w0" },
+  method: "listPhonelines",
+  args: ["w0"],
+});
+
 for (const tool of newToolCases) {
   test(`${tool.name} tool`, async () => {
     const backend = new FakeBackend();
@@ -1328,8 +1340,8 @@ test("read-only mode does not register write tools", () => {
     "get_device",
     "get_device_caller_id",
     "get_device_local_prefix",
-    "get_device_tariff_announcement",
-    "get_device_single_row_display",
+    "get_tariff_announcement",
+    "get_single_row_display",
     "get_device_contingents",
     "list_user_numbers",
     "validate_quick_dial",
@@ -1342,8 +1354,9 @@ test("read-only mode does not register write tools", () => {
     "list_notifications",
     "list_faxlines",
     "list_faxline_numbers",
+    "list_phonelines",
     "get_phoneline",
-    "get_phoneline_block_anonymous",
+    "get_anonymous_call_blocking",
     "list_phoneline_devices",
     "list_parallel_forwardings",
     "list_phoneline_voicemails",
@@ -1398,8 +1411,8 @@ test("tool annotations and charge warnings distinguish every read and write tool
     "list_autorecording_greetings",
     "get_autorecording_settings",
     "record_voicemail_greeting",
-    "create_autorecording_greeting",
-    "delete_autorecording_greeting",
+    "create_recording_greeting",
+    "delete_recording_greeting",
     "set_autorecording_settings",
   ]) {
     const recordingTool = definitions.find((tool) => tool.name === name);
@@ -1411,6 +1424,96 @@ test("tool annotations and charge warnings distinguish every read and write tool
     assert.ok(fax);
     assert.match(fax.description, /FAX INCURS CHARGES/);
   }
-  assert.equal(definitions.filter((tool) => tool.annotations.readOnlyHint).length, 47);
+  assert.equal(definitions.filter((tool) => tool.annotations.readOnlyHint).length, 48);
   assert.equal(definitions.filter((tool) => !tool.annotations.readOnlyHint).length, 82);
+});
+
+const userIdCases: Array<{ name: string; input: Record<string, unknown> }> = [
+  ...newToolCases.filter((tool) => tool.input.user_id === "w0"),
+  { name: "get_device_contingents", input: { user_id: "w0", device_id: "e0" } },
+  { name: "list_user_numbers", input: { user_id: "w0" } },
+  {
+    name: "set_forwarding",
+    input: { user_id: "w0", phoneline_id: "p0", forwardings: [{ destination: "+4915799912345", timeout: 0 }] },
+  },
+  { name: "create_register_device", input: { user_id: "w0", alias: "Desk" } },
+  { name: "create_mobile_device", input: { user_id: "w0", alias: "Mobile" } },
+  { name: "create_external_device", input: { user_id: "w0", alias: "Home", number: "+4915799912345" } },
+  { name: "create_quick_dial", input: { user_id: "w0", number: "+4921100000" } },
+  { name: "update_quick_dial", input: { user_id: "w0", quick_dial_id: "q0", number: "+4921100000" } },
+  { name: "send_sms", input: { user_id: "w0", recipient: "+4915799912345", message: "Hi" } },
+];
+
+function toolIn(backend: FakeBackend | Parameters<typeof createToolDefinitions>[0], scope: "user" | "account", name: string) {
+  const definition = createToolDefinitions(backend, false, scope, "w0").find((tool) => tool.name === name);
+  assert.ok(definition, `missing tool ${name}`);
+  return definition;
+}
+
+function withoutUserId(input: Record<string, unknown>): Record<string, unknown> {
+  const { user_id: _omitted, ...rest } = input;
+  return rest;
+}
+
+test("every user-scope tool whose user_id defaults to the authenticated user has a table case", () => {
+  const defaulted = createToolDefinitions(new FakeBackend(), false, "user", "w0")
+    .filter((tool) => {
+      const schema = z.toJSONSchema(tool.inputSchema, { target: "draft-7", io: "input" }) as {
+        properties?: Record<string, { default?: unknown }>;
+        required?: string[];
+      };
+      return schema.properties?.user_id?.default === "w0" && !schema.required?.includes("user_id");
+    })
+    .map((tool) => tool.name)
+    .sort();
+  assert.equal(defaulted.length, 49);
+  assert.deepEqual([...new Set(userIdCases.map((tool) => tool.name))].sort(), defaulted);
+});
+
+test("user scope fills an omitted user_id with the authenticated user before delegating", async () => {
+  for (const { name, input } of userIdCases) {
+    const explicit = new FakeBackend();
+    await toolIn(explicit, "user", name).execute(input);
+    const omitted = new FakeBackend();
+    await toolIn(omitted, "user", name).execute(withoutUserId(input));
+    assert.deepEqual(omitted.calls, explicit.calls, `${name} must delegate the authenticated user`);
+    assert.ok(JSON.stringify(omitted.calls).includes('"w0"'), `${name} must pass w0`);
+  }
+});
+
+test("user scope passes an explicit foreign user_id on, and the access layer rejects it", async () => {
+  for (const { name, input } of userIdCases) {
+    const delegate = new FakeBackend();
+    const scoped = await createAccessControlledBackend(delegate, "user");
+    await assert.rejects(
+      toolIn(scoped, "user", name).execute({ ...input, user_id: "w1" }),
+      (error: unknown) => error instanceof AccessPolicyError,
+      `${name} must reject another user's ID`,
+    );
+    assert.equal(JSON.stringify(delegate.calls).includes('"w1"'), false, `${name} leaked w1 to the backend`);
+  }
+});
+
+test("account scope still requires user_id", async () => {
+  for (const { name, input } of userIdCases) {
+    const backend = new FakeBackend();
+    await assert.rejects(
+      toolIn(backend, "account", name).execute(withoutUserId(input)),
+      (error: unknown) => error instanceof z.ZodError,
+      `${name} must require user_id in account scope`,
+    );
+    assert.deepEqual(backend.calls, [], `${name} must not reach the backend without user_id`);
+  }
+});
+
+test("tool names are unique and fit sona's 28-character limit", () => {
+  for (const scope of ["user", "account"] as const) {
+    const names = createToolDefinitions(new FakeBackend(), false, scope, "w0").map((tool) => tool.name);
+    assert.equal(names.length, 130);
+    assert.equal(new Set(names).size, names.length);
+    for (const name of names) {
+      assert.match(name, /^[a-z][a-z0-9_]*$/);
+      assert.ok(name.length <= 28, `${name} has ${name.length} characters`);
+    }
+  }
 });
